@@ -5,7 +5,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi.testclient import TestClient
 import app as app_module
-from models import EvaluationData
+from models import BonusPoints, EvaluationData
 
 
 class FakeEvaluator:
@@ -49,3 +49,29 @@ def test_health_endpoint():
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_bonus_cap_matches_hiring_agent_imp_models_constraint():
+    """Regression guard: if hiring-agent-imp's BonusPoints.total cap ever changes,
+    this test fails, signaling that app.compute_overall_score's hardcoded
+    max_total + 20 formula needs to be updated to match."""
+    bonus_field = BonusPoints.model_fields["total"]
+    le_constraint = next(
+        (item.le for item in bonus_field.metadata if hasattr(item, "le") and item.le is not None),
+        None,
+    )
+    assert le_constraint == 20
+
+
+def test_category_maxes_sum_to_expected_total():
+    """Regression guard: hiring-agent-imp's score.py hardcodes category maxes
+    (open_source=35, self_projects=30, production=25, technical_skills=10)
+    summing to 100. If this ever changes there, app_module.CATEGORY_MAXES
+    needs to be updated to match."""
+    assert sum(app_module.CATEGORY_MAXES.values()) == 100
+    assert app_module.CATEGORY_MAXES == {
+        "open_source": 35,
+        "self_projects": 30,
+        "production": 25,
+        "technical_skills": 10,
+    }

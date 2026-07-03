@@ -2,10 +2,25 @@ import os
 import sys
 from pathlib import Path
 
-HIRING_AGENT_REPO_PATH = os.environ.get(
-    "HIRING_AGENT_REPO_PATH",
-    str(Path(__file__).resolve().parent.parent.parent.parent.parent / "hiring-agent-imp"),
-)
+
+def _resolve_hiring_agent_repo_path() -> str:
+    override = os.environ.get("HIRING_AGENT_REPO_PATH")
+    if override:
+        return override
+
+    here = Path(__file__).resolve()
+    for ancestor in here.parents:
+        candidate = ancestor.parent / "hiring-agent-imp"
+        if (candidate / "score.py").exists():
+            return str(candidate)
+
+    raise RuntimeError(
+        "Could not locate the hiring-agent-imp repo as a sibling directory at any "
+        "ancestor level. Set HIRING_AGENT_REPO_PATH explicitly."
+    )
+
+
+HIRING_AGENT_REPO_PATH = _resolve_hiring_agent_repo_path()
 sys.path.insert(0, HIRING_AGENT_REPO_PATH)
 
 from fastapi import FastAPI
@@ -16,6 +31,13 @@ from prompt import DEFAULT_MODEL, MODEL_PARAMETERS
 RUBRIC_VERSION = "hiring-agent-v1"
 HIRING_AGENT_SERVICE_VERSION = "0.1.0"
 
+# NOTE: This mirrors the scoring formula in hiring-agent-imp/score.py's
+# print_evaluation_results (category capping, +bonus, -deductions, cap at
+# max_score+20). hiring-agent-imp does not expose this as an importable
+# function, and that repo must never be modified, so this is a deliberate,
+# accepted duplication. test_evaluate.py has a regression-guard test that
+# will fail if hiring-agent-imp's BonusPoints cap changes without this
+# formula being updated to match.
 CATEGORY_MAXES = {
     "open_source": 35,
     "self_projects": 30,
