@@ -18,7 +18,9 @@ Target user for v1: single user, local-first (no auth, no multi-tenancy, no clou
 POST /evaluate
   body: { resume_json: <canonical Resume JSON>, github_username: str | null }
   returns: { overall_score, open_source_score, projects_score,
-             production_score, technical_skills_score, evidence, raw }
+             production_score, technical_skills_score, evidence,
+             bonus_points, deductions, rubric_version,
+             hiring_agent_service_version, raw }
 ```
 
 It calls `score.py`'s functions in-process and returns structured JSON instead of CSV/stdout. It never modifies the evaluator's core logic — it is a read-only caller. The main backend talks to it over the Docker Compose network (`http://hiring-agent-service:PORT`).
@@ -28,6 +30,8 @@ It calls `score.py`'s functions in-process and returns structured JSON instead o
 A single Pydantic model, `ResumeDocument`, is the internal lingua franca. Every parser (PDF, DOCX) converts its input into this shape, and every downstream service (analyzer, gap analyzer, tailoring engine, hiring-agent adapter, template renderer) consumes and/or produces this shape — never raw text. This is what gets versioned in `resume_versions` (see §5).
 
 Fields (high level, refined in Phase 2 when the parser is built): contact info, summary, work experience (company, title, dates, bullets), projects, skills, education, certifications. Loosely modeled on JSON Resume, matching the pattern `transform.py` already uses in the hiring-agent repo.
+
+**Versioning:** every `ResumeDocument` instance carries a top-level `schema_version` int field, set at construction time. Consumers (analyzer, tailoring engine, template renderer, etc.) check `schema_version` and apply a migration function if they receive an older version than they expect, rather than assuming the current shape. This means a `resume_versions.resume_json` row written under `schema_version: 1` stays readable after the model gains fields in a later phase — new optional fields default sensibly, and any renamed/restructured field gets an explicit migrator function registered in `backend/app/schemas/resume_migrations.py` (created when the first breaking change happens, not in Phase 1).
 
 ## 4. Service Boundaries
 
@@ -58,9 +62,15 @@ Replaces a flat "provider" abstraction with a task-driven orchestrator. Each AI 
 
 The orchestrator resolves the provider adapter, renders the prompt, calls the model, validates the response, and logs the call (§7, `llm_calls`). Provider adapters implemented in Phase 1: **Gemini** (reusing this repo's known-good backoff/rate-limit pattern), **NVIDIA** (OpenAI-compatible client against `https://integrate.api.nvidia.com/v1`, model configurable — e.g. `z-ai/glm-5.2` — key read from `NVIDIA_API_KEY` env var, never hardcoded). Claude and OpenAI adapters are stubbed with the same interface, wired in a later phase.
 
+**Failure policy:** each task declares an ordered `fallback_providers` list (may be empty). On a call failure (timeout, rate-limit, schema-validation failure after its one retry), the orchestrator:
+1. Retries the *same* provider once with backoff (reusing the existing Gemini rate-limit/jitter pattern for all providers, not just Gemini).
+2. If that also fails and `fallback_providers` is non-empty, tries the next provider in the list with the same prompt/schema.
+3. If all providers are exhausted, the orchestrator raises a typed `OrchestratorError`, the calling stage marks its `pipeline_runs` row `status = failed` with `error_message` set, and the pipeline stops — it does not silently continue with a partial/unvalidated result.
+Every attempt (success or failure, same-provider retry or fallback) gets its own `llm_calls` row, so the full attempt sequence for a given `pipeline_run` is reconstructable from `llm_calls.session_id` + `task_type` + `created_at` ordering. In Phase 1, `fallback_providers` is exercised by config alone (e.g. `nvidia` falls back to `gemini`); no task logic depends on it yet since no real tasks exist until Phase 2+.
+
 ## 6. Prompt Registry
 
-Prompts live outside the codebase-as-logic, under `backend/prompts/`, as Jinja2 templates (mirroring the hiring-agent repo's `prompts/templates` pattern) — never hardcoded in Python. Each prompt file is versioned; the `prompt_versions` table (§7) records which version was used for a given `llm_calls` row, so any tailoring decision can be traced back to the exact prompt that produced it.
+Prompts live outside the codebase-as-logic, under `backend/prompts/`, as Jinja2 templates (mirroring the hiring-agent repo's `prompts/templates` pattern) — never hardcoded in Python. Templates are organized and looked up by `{task_type}/{version}.jinja2` (e.g. `prompts/tailoring_rewrite/v1.jinja2`), not by an arbitrary filename — the registry key is always `(task_type, version)`. On startup, the `PromptRegistry` scans this layout and upserts a row per template into `prompt_versions` (`task_type`, `name` = the task_type, `version`, `template_path`), so the DB catalog always mirrors what's on disk. The AI Orchestrator resolves a task's active prompt via `PromptRegistry.get(task_type, version="latest" | pinned_version)`, and the resulting `prompt_versions.id` is what gets attached to the corresponding `llm_calls` row — so any tailoring decision traces back to the exact `(task_type, version)` pair that produced it, not just a filename.
 
 ## 7. Data Model (Postgres, local via Docker)
 
@@ -69,7 +79,7 @@ Prompts live outside the codebase-as-logic, under `backend/prompts/`, as Jinja2 
 - **job_postings** — id, source_url, source_provider, raw_text, parsed_json, created_at
 - **tailoring_sessions** — id, resume_id (FK), job_posting_id (FK), status, created_at, updated_at — the root entity tying one resume+job run together
 - **pipeline_runs** — id, session_id (FK), stage_name, status (pending/running/succeeded/failed), started_at, completed_at, error_message — gives every stage an async-ready, pollable status row even before a real queue exists (§8)
-- **evaluation_runs** — id, session_id (FK), resume_version_id (FK), overall_score, open_source_score, projects_score, production_score, technical_skills_score, raw_response_json, created_at
+- **evaluation_runs** — id, session_id (FK), resume_version_id (FK), overall_score, open_source_score, projects_score, production_score, technical_skills_score, raw_response_json, rubric_version, hiring_agent_service_version, created_at. The 5 named score columns are a denormalized convenience for querying/sorting; `raw_response_json` stores the **entire** unmodified `/evaluate` response body (evidence, bonus points, deductions, per-category rationale, everything `hiring-agent-service` returns) so that if the hiring-agent scoring rubric changes categories later, historical runs remain fully reconstructable from `raw_response_json` alone — the 5 named columns are a read-optimization, not the source of truth. `rubric_version` and `hiring_agent_service_version` are echoed back from the wrapper's response so old rows stay interpretable if the rubric changes.
 - **generated_documents** — id, session_id (FK), document_type (tailored_resume_pdf | cover_letter | ats_report | skill_gap_report | recruiter_summary | interview_questions), storage_path, content, version_number, created_at — one row per output artifact, independently regenerable/versioned
 - **prompt_versions** — id, task_type, name, version, template_path, created_at
 - **llm_calls** — id, session_id (FK), prompt_version_id (FK), provider, model, task_type, temperature, request_payload, response_payload, validated (bool), latency_ms, created_at
@@ -149,7 +159,7 @@ resume-tailor/
 1. Repo skeleton above, committed.
 2. Alembic migration creating all 8 tables in §7.
 3. `ResumeDocument` Pydantic schema (fields refined in Phase 2, but the shape exists now so `resume_versions.resume_json` has a real type).
-4. AI Orchestrator + Prompt Registry classes, with **Gemini** and **NVIDIA** adapters implemented and smoke-tested against a trivial prompt; Claude/OpenAI adapters stubbed (same interface, `NotImplementedError` body).
+4. AI Orchestrator + Prompt Registry classes, with **Gemini** and **NVIDIA** adapters implemented and smoke-tested against a trivial prompt (including the same-provider-retry → fallback-provider → `OrchestratorError` failure path, §5); Claude/OpenAI adapters stubbed (same interface, `NotImplementedError` body).
 5. `Storage` protocol + `LocalDiskStorage`.
 6. `hiring-agent-service` wrapper with a working `/evaluate` endpoint, smoke-tested against the existing `hiring-agent` repo's `score.py`.
 7. `docker-compose.yml` bringing up Postgres + `hiring-agent-service` + `backend` locally.
