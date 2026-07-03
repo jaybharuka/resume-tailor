@@ -157,7 +157,7 @@ resume-tailor/
 ## 13. Phase 1 Deliverables (concrete)
 
 1. Repo skeleton above, committed.
-2. Alembic migration creating all 8 tables in §7.
+2. Alembic migration creating all 9 tables in §7.
 3. `ResumeDocument` Pydantic schema (fields refined in Phase 2, but the shape exists now so `resume_versions.resume_json` has a real type).
 4. AI Orchestrator + Prompt Registry classes, with **Gemini** and **NVIDIA** adapters implemented and smoke-tested against a trivial prompt (including the same-provider-retry → fallback-provider → `OrchestratorError` failure path, §5); Claude/OpenAI adapters stubbed (same interface, `NotImplementedError` body).
 5. `Storage` protocol + `LocalDiskStorage`.
