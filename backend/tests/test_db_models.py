@@ -1,0 +1,58 @@
+from app.core.db import make_engine, make_session_factory
+from app.models.db_models import (
+    Base, Resume, ResumeVersion, JobPosting, TailoringSession,
+    PipelineRun, EvaluationRun, GeneratedDocument, PromptVersion, LLMCall,
+)
+
+
+def test_all_nine_tables_create_and_accept_a_linked_row():
+    engine = make_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    SessionFactory = make_session_factory(engine)
+
+    with SessionFactory() as db:
+        resume = Resume(original_filename="jane.pdf", storage_path="/tmp/jane.pdf")
+        db.add(resume)
+        db.flush()
+
+        version = ResumeVersion(
+            resume_id=resume.id, version_number=1,
+            resume_json={"schema_version": 1, "contact": {"full_name": "Jane"}},
+            produced_by_stage="upload",
+        )
+        job = JobPosting(source_url="https://example.com/job", source_provider="greenhouse")
+        db.add_all([version, job])
+        db.flush()
+
+        session = TailoringSession(resume_id=resume.id, job_posting_id=job.id, status="created")
+        db.add(session)
+        db.flush()
+
+        pipeline_run = PipelineRun(session_id=session.id, stage_name="resume_parsing", status="succeeded")
+        evaluation = EvaluationRun(
+            session_id=session.id, resume_version_id=version.id,
+            overall_score=85.0, raw_response_json={"overall_score": 85.0},
+        )
+        document = GeneratedDocument(
+            session_id=session.id, document_type="ats_report",
+            content="report body", version_number=1,
+        )
+        prompt_version = PromptVersion(
+            task_type="tailoring_rewrite", name="tailoring_rewrite", version="v1",
+            template_path="prompts/tailoring_rewrite/v1.jinja2",
+        )
+        db.add_all([pipeline_run, evaluation, document, prompt_version])
+        db.flush()
+
+        llm_call = LLMCall(
+            session_id=session.id, prompt_version_id=prompt_version.id,
+            provider="gemini", model="gemini-1.5-flash", task_type="tailoring_rewrite",
+            temperature=0.7, request_payload={"prompt": "hi"}, response_payload={"text": "hello"},
+            validated=True, latency_ms=250,
+        )
+        db.add(llm_call)
+        db.commit()
+
+        assert db.query(Resume).count() == 1
+        assert db.query(LLMCall).count() == 1
+        assert db.query(EvaluationRun).first().overall_score == 85.0
