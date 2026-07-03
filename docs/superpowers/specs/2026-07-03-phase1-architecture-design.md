@@ -171,3 +171,7 @@ resume-tailor/
 ## 14. Security Note
 
 The NVIDIA API key provided during design must never be committed to source. It is read from `NVIDIA_API_KEY` in `backend/.env` (gitignored), with `.env.example` documenting the variable name only. Given the key was shared in a plaintext chat message, it should be rotated in the NVIDIA console after initial testing.
+
+## 15. Known Follow-Ups for Later Phases
+
+- **`llm_calls.prompt_version_id` cascade policy.** Task 4's implementation (post-review) applies `ondelete="CASCADE"` to every foreign key, per an explicit "CASCADE everywhere" decision made during Phase 1 implementation. This is correct for most of the schema, but it means deleting a `prompt_versions` row would cascade-delete every `llm_calls` row that references it — silently destroying the audit trail of what prompt actually produced a given AI-driven change, which conflicts with this project's "every modification should be explainable" principle (see the AI Design section above). Nothing deletes `prompt_versions` rows in Phase 1, so this is not yet a live bug. When a later phase introduces prompt-version cleanup/deprecation, revisit this FK specifically: change it to `ondelete="RESTRICT"` (block deleting a prompt version while `llm_calls` still reference it) or nullify the FK on delete instead of cascading, so historical audit rows survive.
