@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   postgres:
     image: postgres:16-alpine
@@ -21,7 +19,7 @@ services:
     build:
       context: ../hiring-agent-service
     volumes:
-      - ../../hiring-agent-imp:/hiring-agent:ro
+      - ${HIRING_AGENT_IMP_PATH:-../../hiring-agent-imp}:/hiring-agent:ro
     environment:
       HIRING_AGENT_REPO_PATH: /hiring-agent
       GEMINI_API_KEY: ${GEMINI_API_KEY}
