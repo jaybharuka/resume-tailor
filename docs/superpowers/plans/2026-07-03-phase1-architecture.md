@@ -2565,7 +2565,7 @@ services:
       POSTGRES_PASSWORD: resume_tailor
       POSTGRES_DB: resume_tailor
     ports:
-      - "5432:5432"
+      - "5442:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -2602,7 +2602,7 @@ services:
     volumes:
       - backend_storage:/app/storage
     ports:
-      - "8000:8000"
+      - "8020:8000"
 
 volumes:
   postgres_data:
@@ -2631,7 +2631,7 @@ what was built.
 2. This repo expects the existing `hiring-agent` repo checked out as a sibling
    directory (`../hiring-agent-imp` relative to this repo's parent).
 3. From `infra/`: `docker compose up -d --build`
-4. Check `curl http://localhost:8000/health`
+4. Check `curl http://localhost:8020/health`
 
 ## Running backend tests without Docker
 
@@ -2656,7 +2656,7 @@ Expected: log ending in `Running upgrade  -> 0001, initial schema`
 
 Check health:
 ```bash
-curl http://localhost:8000/health
+curl http://localhost:8020/health
 ```
 Expected: `{"database":"ok","hiring_agent_service":"ok"}`
 
