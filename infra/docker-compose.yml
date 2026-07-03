@@ -1,0 +1,52 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: resume_tailor
+      POSTGRES_PASSWORD: resume_tailor
+      POSTGRES_DB: resume_tailor
+    ports:
+      - "5442:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U resume_tailor"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  hiring-agent-service:
+    build:
+      context: ../hiring-agent-service
+    volumes:
+      - ../../hiring-agent-imp:/hiring-agent:ro
+    environment:
+      HIRING_AGENT_REPO_PATH: /hiring-agent
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+    ports:
+      - "8100:8100"
+
+  backend:
+    build:
+      context: ../backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      hiring-agent-service:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://resume_tailor:resume_tailor@postgres:5432/resume_tailor
+      STORAGE_ROOT: /app/storage
+      HIRING_AGENT_SERVICE_URL: http://hiring-agent-service:8100
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      NVIDIA_API_KEY: ${NVIDIA_API_KEY}
+    volumes:
+      - backend_storage:/app/storage
+    ports:
+      - "8020:8000"
+
+volumes:
+  postgres_data:
+  backend_storage:
