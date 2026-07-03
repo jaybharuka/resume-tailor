@@ -37,7 +37,7 @@ def upgrade():
     op.create_table(
         "resume_versions",
         sa.Column("id", sa.Integer, primary_key=True),
-        sa.Column("resume_id", sa.Integer, sa.ForeignKey("resumes.id"), nullable=False),
+        sa.Column("resume_id", sa.Integer, sa.ForeignKey("resumes.id", ondelete="CASCADE"), nullable=False),
         sa.Column("version_number", sa.Integer, nullable=False),
         sa.Column("resume_json", sa.JSON, nullable=False),
         sa.Column("produced_by_stage", sa.String, nullable=False),
@@ -47,8 +47,8 @@ def upgrade():
     op.create_table(
         "tailoring_sessions",
         sa.Column("id", sa.Integer, primary_key=True),
-        sa.Column("resume_id", sa.Integer, sa.ForeignKey("resumes.id"), nullable=False),
-        sa.Column("job_posting_id", sa.Integer, sa.ForeignKey("job_postings.id"), nullable=False),
+        sa.Column("resume_id", sa.Integer, sa.ForeignKey("resumes.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("job_posting_id", sa.Integer, sa.ForeignKey("job_postings.id", ondelete="CASCADE"), nullable=False),
         sa.Column("status", sa.String, nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
@@ -57,7 +57,7 @@ def upgrade():
     op.create_table(
         "pipeline_runs",
         sa.Column("id", sa.Integer, primary_key=True),
-        sa.Column("session_id", sa.Integer, sa.ForeignKey("tailoring_sessions.id"), nullable=False),
+        sa.Column("session_id", sa.Integer, sa.ForeignKey("tailoring_sessions.id", ondelete="CASCADE"), nullable=False),
         sa.Column("stage_name", sa.String, nullable=False),
         sa.Column("status", sa.String, nullable=False),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
@@ -68,8 +68,8 @@ def upgrade():
     op.create_table(
         "evaluation_runs",
         sa.Column("id", sa.Integer, primary_key=True),
-        sa.Column("session_id", sa.Integer, sa.ForeignKey("tailoring_sessions.id"), nullable=False),
-        sa.Column("resume_version_id", sa.Integer, sa.ForeignKey("resume_versions.id"), nullable=False),
+        sa.Column("session_id", sa.Integer, sa.ForeignKey("tailoring_sessions.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("resume_version_id", sa.Integer, sa.ForeignKey("resume_versions.id", ondelete="CASCADE"), nullable=False),
         sa.Column("overall_score", sa.Float, nullable=True),
         sa.Column("open_source_score", sa.Float, nullable=True),
         sa.Column("projects_score", sa.Float, nullable=True),
@@ -84,7 +84,7 @@ def upgrade():
     op.create_table(
         "generated_documents",
         sa.Column("id", sa.Integer, primary_key=True),
-        sa.Column("session_id", sa.Integer, sa.ForeignKey("tailoring_sessions.id"), nullable=False),
+        sa.Column("session_id", sa.Integer, sa.ForeignKey("tailoring_sessions.id", ondelete="CASCADE"), nullable=False),
         sa.Column("document_type", sa.String, nullable=False),
         sa.Column("storage_path", sa.String, nullable=True),
         sa.Column("content", sa.Text, nullable=True),
@@ -105,8 +105,8 @@ def upgrade():
     op.create_table(
         "llm_calls",
         sa.Column("id", sa.Integer, primary_key=True),
-        sa.Column("session_id", sa.Integer, sa.ForeignKey("tailoring_sessions.id"), nullable=True),
-        sa.Column("prompt_version_id", sa.Integer, sa.ForeignKey("prompt_versions.id"), nullable=True),
+        sa.Column("session_id", sa.Integer, sa.ForeignKey("tailoring_sessions.id", ondelete="CASCADE"), nullable=True),
+        sa.Column("prompt_version_id", sa.Integer, sa.ForeignKey("prompt_versions.id", ondelete="CASCADE"), nullable=True),
         sa.Column("provider", sa.String, nullable=False),
         sa.Column("model", sa.String, nullable=False),
         sa.Column("task_type", sa.String, nullable=False),
