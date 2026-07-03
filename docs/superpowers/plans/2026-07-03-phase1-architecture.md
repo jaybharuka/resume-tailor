@@ -1432,149 +1432,23 @@ git commit -m "feat: add generalized exponential-backoff-with-jitter retry helpe
 
 ---
 
-### Task 8: Gemini provider adapter
+### Task 8: NVIDIA provider adapter (primary)
+
+> **Plan amendment (post-Task-7):** the project owner decided NVIDIA NIM is the primary provider for Phase 1 (API key already provisioned), not Gemini. Gemini is deferred to a stub alongside Claude/OpenAI (Task 9). Reference model: `z-ai/glm-5.2`.
 
 **Files:**
 - Create: `backend/app/core/llm/providers/__init__.py`
-- Create: `backend/app/core/llm/providers/gemini_provider.py`
-- Test: `backend/tests/test_gemini_provider.py`
-
-**Interfaces:**
-- Consumes: `ProviderError` (Task 6), `with_backoff` (Task 7).
-- Produces: `GeminiProvider(api_key: str)` implementing `Provider` (`name = "gemini"`, `.generate(prompt, model, temperature) -> str`).
-
-- [ ] **Step 1: Write the failing test**
-
-`backend/tests/test_gemini_provider.py`:
-```python
-import sys
-import pytest
-from app.core.llm.provider import ProviderError
-from app.core.llm.providers.gemini_provider import GeminiProvider
-
-
-class FakeResponse:
-    def __init__(self, text):
-        self.text = text
-
-
-class FakeGenerativeModel:
-    def __init__(self, model_name, generation_config):
-        self.model_name = model_name
-        self.generation_config = generation_config
-
-    def generate_content(self, prompt):
-        return FakeResponse(text='{"text": "hello from gemini"}')
-
-
-class FakeGenAIModule:
-    def configure(self, api_key):
-        self.api_key = api_key
-
-    def GenerativeModel(self, model_name, generation_config):
-        return FakeGenerativeModel(model_name, generation_config)
-
-
-def test_generate_returns_model_text(monkeypatch):
-    monkeypatch.setitem(sys.modules, "google.generativeai", FakeGenAIModule())
-
-    provider = GeminiProvider(api_key="fake-key")
-    result = provider.generate("say hi", model="gemini-1.5-flash", temperature=0.5)
-
-    assert result == '{"text": "hello from gemini"}'
-
-
-def test_generate_wraps_unexpected_errors_as_provider_error(monkeypatch):
-    class BrokenGenerativeModel:
-        def __init__(self, model_name, generation_config):
-            pass
-
-        def generate_content(self, prompt):
-            raise RuntimeError("network down")
-
-    class BrokenGenAIModule:
-        def configure(self, api_key):
-            pass
-
-        def GenerativeModel(self, model_name, generation_config):
-            return BrokenGenerativeModel(model_name, generation_config)
-
-    monkeypatch.setitem(sys.modules, "google.generativeai", BrokenGenAIModule())
-
-    provider = GeminiProvider(api_key="fake-key")
-    with pytest.raises(ProviderError):
-        provider.generate("say hi", model="gemini-1.5-flash", temperature=0.5)
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run (from `backend/`): `pytest tests/test_gemini_provider.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'app.core.llm.providers'`
-
-- [ ] **Step 3: Implement GeminiProvider**
-
-`backend/app/core/llm/providers/__init__.py`: empty file.
-
-`backend/app/core/llm/providers/gemini_provider.py`:
-```python
-from google.api_core.exceptions import ResourceExhausted
-from app.core.llm.provider import ProviderError
-from app.core.llm.retry import with_backoff
-
-
-class GeminiProvider:
-    name = "gemini"
-
-    def __init__(self, api_key: str):
-        import google.generativeai as genai
-
-        genai.configure(api_key=api_key)
-        self._client = genai
-
-    def generate(self, prompt: str, model: str, temperature: float) -> str:
-        def call():
-            gemini_model = self._client.GenerativeModel(
-                model_name=model, generation_config={"temperature": temperature},
-            )
-            response = gemini_model.generate_content(prompt)
-            return response.text
-
-        try:
-            return with_backoff(
-                call, is_retryable=lambda e: isinstance(e, ResourceExhausted),
-                max_retries=5, base_delay=10.0, max_delay=120.0,
-            )
-        except Exception as exc:
-            raise ProviderError(f"Gemini call failed: {exc}") from exc
-```
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run (from `backend/`): `pytest tests/test_gemini_provider.py -v`
-Expected: 2 passed
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add backend/app/core/llm/providers/__init__.py backend/app/core/llm/providers/gemini_provider.py \
-  backend/tests/test_gemini_provider.py
-git commit -m "feat: add GeminiProvider adapter with rate-limit backoff"
-```
-
----
-
-### Task 9: NVIDIA provider adapter
-
-**Files:**
 - Create: `backend/app/core/llm/providers/nvidia_provider.py`
 - Create: `backend/scripts/smoke_test_nvidia.py`
 - Test: `backend/tests/test_nvidia_provider.py`
 
 **Interfaces:**
 - Consumes: `ProviderError` (Task 6), `with_backoff` (Task 7), `get_settings` (Task 1).
-- Produces: `NvidiaProvider(api_key: str, base_url: str = "https://integrate.api.nvidia.com/v1")` implementing `Provider` (`name = "nvidia"`).
+- Produces: `NvidiaProvider(api_key: str, base_url: str = "https://integrate.api.nvidia.com/v1", sleep: Callable[[float], None] = time.sleep)` implementing `Provider` (`name = "nvidia"`).
+- Failure classification: retryable = `openai.APIConnectionError`, `openai.APITimeoutError`, or `openai.APIStatusError` with `status_code == 429` or `status_code >= 500`. Not retryable (fails fast, no retry) = everything else, including 4xx auth/bad-request errors (401/403/400/404/422).
+- Security: the API key is never hardcoded (read from `Settings.nvidia_api_key`, itself sourced from `.env`), and is stripped out of any `ProviderError` message via `_sanitize` before it can reach a log line or an `llm_calls` row.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing tests**
 
 `backend/tests/test_nvidia_provider.py`:
 ```python
@@ -1597,6 +1471,12 @@ class FakeChoice:
 class FakeCompletion:
     def __init__(self, content):
         self.choices = [FakeChoice(content)]
+
+
+class FakeAPIStatusError(Exception):
+    def __init__(self, message: str, status_code: int):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class FakeCompletions:
@@ -1643,27 +1523,133 @@ def test_generate_wraps_unexpected_errors_as_provider_error(monkeypatch):
     provider = NvidiaProvider(api_key="fake-key")
     with pytest.raises(ProviderError):
         provider.generate("say hi", model="z-ai/glm-5.2", temperature=1.0)
+
+
+def test_auth_error_fails_fast_without_retrying(monkeypatch):
+    monkeypatch.setattr(nvidia_provider_module, "APIStatusError", FakeAPIStatusError)
+
+    call_count = {"n": 0}
+
+    class AuthFailingCompletions:
+        def create(self, **kwargs):
+            call_count["n"] += 1
+            raise FakeAPIStatusError("Invalid API key", status_code=401)
+
+    class AuthFailingChat:
+        def __init__(self):
+            self.completions = AuthFailingCompletions()
+
+    class AuthFailingOpenAIClient:
+        def __init__(self, base_url, api_key):
+            self.chat = AuthFailingChat()
+
+    monkeypatch.setattr(nvidia_provider_module, "OpenAI", AuthFailingOpenAIClient)
+
+    provider = NvidiaProvider(api_key="fake-key", sleep=lambda s: None)
+    with pytest.raises(ProviderError):
+        provider.generate("say hi", model="z-ai/glm-5.2", temperature=1.0)
+
+    assert call_count["n"] == 1
+
+
+def test_rate_limit_error_is_retried_then_succeeds(monkeypatch):
+    monkeypatch.setattr(nvidia_provider_module, "APIStatusError", FakeAPIStatusError)
+
+    call_count = {"n": 0}
+
+    class FlakyCompletions:
+        def create(self, **kwargs):
+            call_count["n"] += 1
+            if call_count["n"] < 2:
+                raise FakeAPIStatusError("Rate limited", status_code=429)
+            return FakeCompletion('{"text": "hello from nvidia"}')
+
+    class FlakyChat:
+        def __init__(self):
+            self.completions = FlakyCompletions()
+
+    class FlakyOpenAIClient:
+        def __init__(self, base_url, api_key):
+            self.chat = FlakyChat()
+
+    monkeypatch.setattr(nvidia_provider_module, "OpenAI", FlakyOpenAIClient)
+
+    provider = NvidiaProvider(api_key="fake-key", sleep=lambda s: None)
+    result = provider.generate("say hi", model="z-ai/glm-5.2", temperature=1.0)
+
+    assert result == '{"text": "hello from nvidia"}'
+    assert call_count["n"] == 2
+
+
+def test_api_key_never_appears_in_provider_error_message(monkeypatch):
+    secret_key = "nvapi-super-secret-value-123"
+
+    class LeakyCompletions:
+        def create(self, **kwargs):
+            raise RuntimeError(f"request failed, Authorization: Bearer {secret_key}")
+
+    class LeakyChat:
+        def __init__(self):
+            self.completions = LeakyCompletions()
+
+    class LeakyOpenAIClient:
+        def __init__(self, base_url, api_key):
+            self.chat = LeakyChat()
+
+    monkeypatch.setattr(nvidia_provider_module, "OpenAI", LeakyOpenAIClient)
+
+    provider = NvidiaProvider(api_key=secret_key, sleep=lambda s: None)
+    with pytest.raises(ProviderError) as exc_info:
+        provider.generate("say hi", model="z-ai/glm-5.2", temperature=1.0)
+
+    assert secret_key not in str(exc_info.value)
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Run tests to verify they fail**
 
 Run (from `backend/`): `pytest tests/test_nvidia_provider.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'app.core.llm.providers.nvidia_provider'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'app.core.llm.providers'`
 
 - [ ] **Step 3: Implement NvidiaProvider**
 
+`backend/app/core/llm/providers/__init__.py`: empty file.
+
 `backend/app/core/llm/providers/nvidia_provider.py`:
 ```python
-from openai import OpenAI, RateLimitError
+import time
+from typing import Callable
+from openai import OpenAI
+from openai import APIStatusError, APIConnectionError, APITimeoutError
 from app.core.llm.provider import ProviderError
 from app.core.llm.retry import with_backoff
+
+
+def _is_retryable_nvidia_error(exc: Exception) -> bool:
+    if isinstance(exc, (APIConnectionError, APITimeoutError)):
+        return True
+    if isinstance(exc, APIStatusError):
+        return exc.status_code == 429 or exc.status_code >= 500
+    return False
+
+
+def _sanitize(message: str, api_key: str) -> str:
+    if api_key and api_key in message:
+        return message.replace(api_key, "***REDACTED***")
+    return message
 
 
 class NvidiaProvider:
     name = "nvidia"
 
-    def __init__(self, api_key: str, base_url: str = "https://integrate.api.nvidia.com/v1"):
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str = "https://integrate.api.nvidia.com/v1",
+        sleep: Callable[[float], None] = time.sleep,
+    ):
+        self._api_key = api_key
         self._client = OpenAI(base_url=base_url, api_key=api_key)
+        self._sleep = sleep
 
     def generate(self, prompt: str, model: str, temperature: float) -> str:
         def call():
@@ -1679,11 +1665,12 @@ class NvidiaProvider:
 
         try:
             return with_backoff(
-                call, is_retryable=lambda e: isinstance(e, RateLimitError),
+                call, is_retryable=_is_retryable_nvidia_error,
                 max_retries=5, base_delay=10.0, max_delay=120.0,
+                sleep=self._sleep,
             )
         except Exception as exc:
-            raise ProviderError(f"NVIDIA call failed: {exc}") from exc
+            raise ProviderError(f"NVIDIA call failed: {_sanitize(str(exc), self._api_key)}") from exc
 ```
 
 `backend/scripts/smoke_test_nvidia.py` (manual verification only, not run by pytest — costs a real API call):
@@ -1702,36 +1689,44 @@ if __name__ == "__main__":
     print(result)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Step 4: Run tests to verify they pass**
 
 Run (from `backend/`): `pytest tests/test_nvidia_provider.py -v`
-Expected: 2 passed
+Expected: 5 passed
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/app/core/llm/providers/nvidia_provider.py backend/scripts/smoke_test_nvidia.py \
-  backend/tests/test_nvidia_provider.py
-git commit -m "feat: add NvidiaProvider adapter (OpenAI-compatible client) and manual smoke script"
+git add backend/app/core/llm/providers/__init__.py backend/app/core/llm/providers/nvidia_provider.py \
+  backend/scripts/smoke_test_nvidia.py backend/tests/test_nvidia_provider.py
+git commit -m "feat: add NvidiaProvider adapter as primary LLM provider (retry classification + key sanitization)"
 ```
 
 ---
 
-### Task 10: Claude/OpenAI stub adapters
+### Task 9: Gemini/Claude/OpenAI stub adapters
+
+> **Plan amendment:** Gemini moves here from its original Task 8 slot — it is now a stub alongside Claude and OpenAI, matching the pattern already planned for those two, since NVIDIA (Task 8) is the primary provider instead.
 
 **Files:**
 - Create: `backend/app/core/llm/providers/stub_providers.py`
 - Test: `backend/tests/test_stub_providers.py`
 
 **Interfaces:**
-- Produces: `ClaudeProvider(api_key: str | None = None)`, `OpenAIProvider(api_key: str | None = None)`, both implementing `Provider` and both raising `NotImplementedError` from `.generate(...)`.
+- Produces: `GeminiProvider(api_key: str | None = None)`, `ClaudeProvider(api_key: str | None = None)`, `OpenAIProvider(api_key: str | None = None)`, all implementing `Provider` and all raising `NotImplementedError` from `.generate(...)`.
 
 - [ ] **Step 1: Write the failing test**
 
 `backend/tests/test_stub_providers.py`:
 ```python
 import pytest
-from app.core.llm.providers.stub_providers import ClaudeProvider, OpenAIProvider
+from app.core.llm.providers.stub_providers import GeminiProvider, ClaudeProvider, OpenAIProvider
+
+
+def test_gemini_provider_raises_not_implemented():
+    provider = GeminiProvider(api_key="unused")
+    with pytest.raises(NotImplementedError):
+        provider.generate("hi", model="gemini-x", temperature=0.5)
 
 
 def test_claude_provider_raises_not_implemented():
@@ -1755,6 +1750,16 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'app.core.llm.provider
 
 `backend/app/core/llm/providers/stub_providers.py`:
 ```python
+class GeminiProvider:
+    name = "gemini"
+
+    def __init__(self, api_key: str | None = None):
+        self.api_key = api_key
+
+    def generate(self, prompt: str, model: str, temperature: float) -> str:
+        raise NotImplementedError("GeminiProvider is a Phase 1 stub; wired in a later phase.")
+
+
 class ClaudeProvider:
     name = "claude"
 
@@ -1778,18 +1783,18 @@ class OpenAIProvider:
 - [ ] **Step 4: Run test to verify it passes**
 
 Run (from `backend/`): `pytest tests/test_stub_providers.py -v`
-Expected: 2 passed
+Expected: 3 passed
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add backend/app/core/llm/providers/stub_providers.py backend/tests/test_stub_providers.py
-git commit -m "feat: add Claude/OpenAI stub provider adapters"
+git commit -m "feat: add Gemini/Claude/OpenAI stub provider adapters"
 ```
 
 ---
 
-### Task 11: LLM call audit logger
+### Task 10: LLM call audit logger
 
 **Files:**
 - Create: `backend/app/core/llm/llm_call_logger.py`
@@ -1886,7 +1891,7 @@ git commit -m "feat: persist every orchestrator attempt to the llm_calls audit t
 
 ---
 
-### Task 12: `hiring-agent-service` HTTP wrapper around the existing hiring-agent repo
+### Task 11: `hiring-agent-service` HTTP wrapper around the existing hiring-agent repo
 
 **Files:**
 - Create: `hiring-agent-service/app.py`
@@ -2125,7 +2130,7 @@ git commit -m "feat: add hiring-agent-service HTTP wrapper with /evaluate and /h
 
 ---
 
-### Task 13: Backend API routes (resumes, job-postings, sessions, run-stage stub, health)
+### Task 12: Backend API routes (resumes, job-postings, sessions, run-stage stub, health)
 
 **Files:**
 - Create: `backend/app/api/__init__.py`
@@ -2509,7 +2514,7 @@ Expected: 8 passed
 - [ ] **Step 5: Run the full backend test suite**
 
 Run (from `backend/`): `pytest -v`
-Expected: all tests from Tasks 1–13 pass (30 tests)
+Expected: all tests from Tasks 1–12 pass (exact count depends on the final task-by-task test tallies, including any review-driven fixes)
 
 - [ ] **Step 6: Commit**
 
@@ -2521,7 +2526,7 @@ git commit -m "feat: add session/job-oriented API routes with 501 run-stage cont
 
 ---
 
-### Task 14: Docker Compose wiring and end-to-end local verification
+### Task 13: Docker Compose wiring and end-to-end local verification
 
 **Files:**
 - Create: `backend/Dockerfile`
@@ -2530,7 +2535,7 @@ git commit -m "feat: add session/job-oriented API routes with 501 run-stage cont
 - Create: `README.md` (repo root)
 
 **Interfaces:**
-- Consumes: `backend/Dockerfile`, `hiring-agent-service/Dockerfile` (Task 12), the sibling `hiring-agent-imp` checkout (bind-mounted read-only).
+- Consumes: `backend/Dockerfile`, `hiring-agent-service/Dockerfile` (Task 11), the sibling `hiring-agent-imp` checkout (bind-mounted read-only).
 
 - [ ] **Step 1: Write the Dockerfiles and compose file**
 
@@ -2672,13 +2677,13 @@ git commit -m "feat: add Docker Compose stack (postgres, hiring-agent-service, b
 ## Self-Review
 
 **Spec coverage:**
-- §2 Hiring Agent Integration → Task 12 (thin wrapper, never modifies the source repo).
+- §2 Hiring Agent Integration → Task 11 (thin wrapper, never modifies the source repo).
 - §3 Canonical Resume JSON + schema versioning → Task 3.
 - §4 Service Boundaries → reflected in the `backend/app/` module layout across all tasks; no extra network hops introduced beyond `hiring-agent-service`.
-- §5 AI Orchestrator + failure policy → Tasks 6, 7 (retry helper reused by Gemini/NVIDIA), 8, 9, 10.
+- §5 AI Orchestrator + failure policy → Tasks 6, 7 (retry helper, reused by NVIDIA and, later, Gemini), 8 (NVIDIA, primary), 9 (Gemini/Claude/OpenAI stubs).
 - §6 Prompt Registry keyed by `(task_type, version)` → Task 5.
 - §7 Data model (9 tables) → Task 4.
-- §8 API shape (session/job-oriented, 501 stubs) → Task 13.
+- §8 API shape (session/job-oriented, 501 stubs) → Task 12.
 - §9 n8n mapping → documentation-only, already captured in the spec; no code task needed.
 - §10 Storage → Task 2.
 - §11 Extensibility notes → satisfied by design (open-ended `document_type`/`stage_name` strings, `fallback_providers` list, `schema_version` field) rather than a discrete task.
