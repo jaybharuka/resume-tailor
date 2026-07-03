@@ -36,7 +36,7 @@ class AIOrchestrator:
         started = time.monotonic()
         try:
             raw_output = provider.generate(prompt, model=task.model, temperature=task.temperature)
-        except ProviderError as exc:
+        except Exception as exc:
             self.on_call_logged({
                 "provider": provider_name, "model": task.model, "task_type": task.task_type,
                 "temperature": task.temperature, "validated": False,

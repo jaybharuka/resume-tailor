@@ -39,6 +39,16 @@ class BadJsonProvider:
         return "not json"
 
 
+class RaisesUnexpectedErrorProvider:
+    def __init__(self, name: str):
+        self.name = name
+        self.calls = 0
+
+    def generate(self, prompt: str, model: str, temperature: float) -> str:
+        self.calls += 1
+        raise RuntimeError("unexpected bug, not a ProviderError")
+
+
 def test_succeeds_on_same_provider_retry():
     provider = FailNTimesProvider(name="gemini", fail_times=1)
     orchestrator = AIOrchestrator(providers={"gemini": provider})
@@ -110,4 +120,25 @@ def test_every_attempt_is_logged_including_failures():
     orchestrator.run(task, prompt="hi")
 
     assert len(logged) == 3
+    assert [entry["validated"] for entry in logged] == [False, False, True]
+
+
+def test_unexpected_non_provider_error_is_logged_and_still_falls_back():
+    logged = []
+    primary = RaisesUnexpectedErrorProvider(name="nvidia")
+    fallback = FailNTimesProvider(name="gemini", fail_times=0)
+    orchestrator = AIOrchestrator(
+        providers={"nvidia": primary, "gemini": fallback},
+        on_call_logged=logged.append,
+    )
+    task = TaskConfig(
+        task_type="echo", provider="nvidia", model="m1", temperature=0.5,
+        response_schema=EchoResult, fallback_providers=["gemini"],
+    )
+
+    result = orchestrator.run(task, prompt="hi")
+
+    assert result.provider_used == "gemini"
+    assert primary.calls == 2  # same-provider retry still happened despite the unexpected exception type
+    assert len(logged) == 3  # nvidia attempt 1 (fail), nvidia attempt 2 (fail), gemini attempt 1 (success)
     assert [entry["validated"] for entry in logged] == [False, False, True]
