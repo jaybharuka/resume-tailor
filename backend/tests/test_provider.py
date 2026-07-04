@@ -29,3 +29,8 @@ def test_strip_json_code_fence_handles_single_line_fence_with_no_newlines():
 def test_strip_json_code_fence_handles_closing_fence_attached_to_content():
     text = '```json\n{"a": 1}```'
     assert strip_json_code_fence(text) == '{"a": 1}'
+
+
+def test_strip_json_code_fence_handles_content_attached_to_opening_fence():
+    text = '```json{"a": 1}\n```'
+    assert strip_json_code_fence(text) == '{"a": 1}'

@@ -5,17 +5,18 @@ import pymupdf
 
 def _build_pdf(lines: list[str]) -> bytes:
     doc = pymupdf.open()
-    page = doc.new_page()
-    y = 50
-    for line in lines:
-        page.insert_text((50, y), line, fontsize=11)
-        y += 18
-        if y > 780:
-            page = doc.new_page()
-            y = 50
-    pdf_bytes = doc.tobytes()
-    doc.close()
-    return pdf_bytes
+    try:
+        page = doc.new_page()
+        y = 50
+        for line in lines:
+            page.insert_text((50, y), line, fontsize=11)
+            y += 18
+            if y > 780:
+                page = doc.new_page()
+                y = 50
+        return doc.tobytes()
+    finally:
+        doc.close()
 
 
 def build_normal_resume_pdf() -> bytes:
@@ -98,9 +99,17 @@ def build_missing_section_resume_pdf() -> bytes:
     ])
 
 
+def build_many_pages_resume_pdf() -> bytes:
+    """Forces the page-overflow branch in _build_pdf (y > 780) by exceeding ~40
+    lines on a single page, so multi-page PDFs are actually exercised by a test."""
+    lines = ["Alpha Marker"] + [f"Filler line {i}" for i in range(43)] + ["Omega Marker"]
+    return _build_pdf(lines)
+
+
 def build_blank_pdf() -> bytes:
     doc = pymupdf.open()
-    doc.new_page()
-    pdf_bytes = doc.tobytes()
-    doc.close()
-    return pdf_bytes
+    try:
+        doc.new_page()
+        return doc.tobytes()
+    finally:
+        doc.close()

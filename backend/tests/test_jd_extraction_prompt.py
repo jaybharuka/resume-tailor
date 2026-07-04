@@ -1,6 +1,8 @@
+import re
 from app.core.llm.prompt_registry import PromptRegistry
 from app.core.db import make_engine, make_session_factory
 from app.models.db_models import Base, PromptVersion
+from app.models.job_posting import JobPostingDocument
 
 
 def test_jd_extraction_prompt_registers_via_sync_to_db():
@@ -39,3 +41,16 @@ def test_jd_extraction_prompt_addresses_title_fabrication_risk():
     lowered = rendered.lower()
     assert "untitled" in lowered
     assert "required" in lowered
+
+
+def test_jd_extraction_prompt_json_shape_matches_job_posting_document_fields():
+    """Ledger item: previously the JSON-shape correctness of this prompt's output
+    block was only verified manually during code review, not by an automated
+    test. This ties the prompt's declared field list directly to
+    JobPostingDocument's actual fields, so schema drift between the two would
+    fail this test."""
+    registry = PromptRegistry(prompts_root="prompts")
+    rendered = registry.render("jd_extraction", "v1", raw_text="Barista at Corner Cafe.")
+    shape_block = re.search(r"\{[^{}]*\}", rendered, re.DOTALL).group(0)
+    keys_in_prompt = re.findall(r'"(\w+)":', shape_block)
+    assert keys_in_prompt == list(JobPostingDocument.model_fields.keys())
