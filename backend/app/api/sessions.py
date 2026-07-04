@@ -1,10 +1,25 @@
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.api.deps import get_db
+from app.core.config import get_settings
+from app.core.db import make_engine, make_session_factory
+from app.core.llm.orchestrator_factory import build_orchestrator
+from app.core.llm.prompt_registry import PromptRegistry
+from app.core.storage import LocalDiskStorage
 from app.models.db_models import Resume, JobPosting, TailoringSession, PipelineRun, GeneratedDocument
+from app.services.resume_parser import parse_resume, ResumeParsingError
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
+
+RESUME_PARSING_TIMEOUT_SECONDS = 330
+_STAGE_EXECUTOR = ThreadPoolExecutor(max_workers=4)
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class CreateSessionRequest(BaseModel):
@@ -30,12 +45,62 @@ def create_session(request: CreateSessionRequest, db: Session = Depends(get_db))
 
 @router.post("/{session_id}/run-stage/{stage_name}")
 def run_stage(session_id: int, stage_name: str, db: Session = Depends(get_db)):
-    if db.get(TailoringSession, session_id) is None:
+    session = db.get(TailoringSession, session_id)
+    if session is None:
         raise HTTPException(status_code=404, detail=f"session {session_id} not found")
-    raise HTTPException(
-        status_code=501,
-        detail=f"stage '{stage_name}' is not implemented yet (Phase 1 contract only)",
+
+    if stage_name != "resume_parsing":
+        raise HTTPException(
+            status_code=501,
+            detail=f"stage '{stage_name}' is not implemented yet (Phase 1 contract only)",
+        )
+
+    resume = db.get(Resume, session.resume_id)
+    pipeline_run = PipelineRun(
+        session_id=session_id, stage_name=stage_name, status="running", started_at=_utcnow(),
     )
+    db.add(pipeline_run)
+    db.commit()
+    db.refresh(pipeline_run)
+
+    settings = get_settings()
+    storage = LocalDiskStorage(root=settings.storage_root)
+    orchestrator = build_orchestrator(db, session_id=session_id)
+    prompt_registry = PromptRegistry(prompts_root=settings.prompts_root)
+
+    future = _STAGE_EXECUTOR.submit(parse_resume, db, resume, storage, orchestrator, prompt_registry)
+
+    try:
+        version = future.result(timeout=RESUME_PARSING_TIMEOUT_SECONDS)
+    except FutureTimeoutError:
+        # The worker thread is still running `parse_resume` in the background and cannot be
+        # forcibly cancelled — it may still commit against `db` after we give up waiting on it.
+        # Touching the same `db` Session from this (the request) thread while that's possible
+        # is unsafe (SQLAlchemy Sessions aren't safe for concurrent multi-thread use), so the
+        # failure record below is written through a fresh, independent session instead of `db`.
+        error_message = f"resume_parsing timed out after {RESUME_PARSING_TIMEOUT_SECONDS} seconds"
+        fresh_db = make_session_factory(make_engine(settings.database_url))()
+        try:
+            fresh_run = fresh_db.get(PipelineRun, pipeline_run.id)
+            fresh_run.status = "failed"
+            fresh_run.error_message = error_message
+            fresh_run.completed_at = _utcnow()
+            fresh_db.commit()
+        finally:
+            fresh_db.close()
+        raise HTTPException(status_code=504, detail=error_message)
+    except ResumeParsingError as exc:
+        pipeline_run.status = "failed"
+        pipeline_run.error_message = str(exc)
+        pipeline_run.completed_at = _utcnow()
+        db.commit()
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    pipeline_run.status = "succeeded"
+    pipeline_run.completed_at = _utcnow()
+    db.commit()
+
+    return {"stage_name": stage_name, "status": "succeeded", "resume_version_id": version.id}
 
 
 @router.get("/{session_id}/status")

@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from sqlalchemy import (
-    Column, Integer, String, Text, DateTime, ForeignKey, JSON, Boolean, Float
+    Column, Integer, String, Text, DateTime, ForeignKey, JSON, Boolean, Float, UniqueConstraint
 )
 from sqlalchemy.orm import declarative_base, relationship
 
@@ -101,6 +101,9 @@ class GeneratedDocument(Base):
 
 class PromptVersion(Base):
     __tablename__ = "prompt_versions"
+    __table_args__ = (
+        UniqueConstraint("task_type", "version", name="uq_prompt_versions_task_type_version"),
+    )
 
     id = Column(Integer, primary_key=True)
     task_type = Column(String, nullable=False)
@@ -115,7 +118,7 @@ class LLMCall(Base):
 
     id = Column(Integer, primary_key=True)
     session_id = Column(Integer, ForeignKey("tailoring_sessions.id", ondelete="CASCADE"), nullable=True)
-    prompt_version_id = Column(Integer, ForeignKey("prompt_versions.id", ondelete="CASCADE"), nullable=True)
+    prompt_version_id = Column(Integer, ForeignKey("prompt_versions.id", ondelete="RESTRICT"), nullable=True)
     provider = Column(String, nullable=False)
     model = Column(String, nullable=False)
     task_type = Column(String, nullable=False)
