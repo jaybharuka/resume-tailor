@@ -1,3 +1,6 @@
+import pytest
+from sqlalchemy.exc import IntegrityError
+
 from app.core.db import make_engine, make_session_factory
 from app.models.db_models import (
     Base, Resume, ResumeVersion, JobPosting, TailoringSession,
@@ -125,3 +128,45 @@ def test_deleting_a_session_cascades_to_its_dependent_rows():
         assert db.query(JobPosting).filter_by(id=job_id).count() == 1
         assert db.query(ResumeVersion).filter_by(id=version_id).count() == 1
         assert db.query(PromptVersion).filter_by(id=prompt_version_id).count() == 1
+
+
+def test_prompt_version_unique_constraint_rejects_duplicates():
+    engine = make_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    SessionFactory = make_session_factory(engine)
+
+    with SessionFactory() as db:
+        db.add(PromptVersion(
+            task_type="resume_parsing", name="resume_parsing", version="v1", template_path="a.jinja2",
+        ))
+        db.commit()
+
+        db.add(PromptVersion(
+            task_type="resume_parsing", name="resume_parsing", version="v1", template_path="b.jinja2",
+        ))
+        with pytest.raises(IntegrityError):
+            db.commit()
+
+
+def test_deleting_referenced_prompt_version_is_restricted():
+    engine = make_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    SessionFactory = make_session_factory(engine)
+
+    with SessionFactory() as db:
+        prompt_version = PromptVersion(
+            task_type="resume_parsing", name="resume_parsing", version="v1", template_path="a.jinja2",
+        )
+        db.add(prompt_version)
+        db.commit()
+
+        llm_call = LLMCall(
+            session_id=None, prompt_version_id=prompt_version.id, provider="nvidia",
+            model="m1", task_type="resume_parsing", validated=True,
+        )
+        db.add(llm_call)
+        db.commit()
+
+        db.delete(prompt_version)
+        with pytest.raises(IntegrityError):
+            db.commit()
