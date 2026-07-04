@@ -20,3 +20,11 @@ def test_has_extractable_text_true_for_real_content():
 def test_has_extractable_text_false_for_near_empty_string():
     assert has_extractable_text("   \n  ") is False
     assert has_extractable_text("") is False
+
+
+def test_has_extractable_text_boundary_at_min_length():
+    """Coverage-only addition (ledger item, not a bug fix) — MIN_EXTRACTED_TEXT_LENGTH
+    is 20; confirm the boundary is inclusive on the low side."""
+    assert has_extractable_text("a" * 19) is False
+    assert has_extractable_text("a" * 20) is True
+    assert has_extractable_text("a" * 21) is True

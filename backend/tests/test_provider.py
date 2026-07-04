@@ -19,3 +19,13 @@ def test_strip_json_code_fence_leaves_unfenced_text_unchanged():
 def test_strip_json_code_fence_handles_surrounding_whitespace():
     text = '  \n```json\n{"a": 1}\n```\n  '
     assert strip_json_code_fence(text) == '{"a": 1}'
+
+
+def test_strip_json_code_fence_handles_single_line_fence_with_no_newlines():
+    text = '```json{"a": 1}```'
+    assert strip_json_code_fence(text) == '{"a": 1}'
+
+
+def test_strip_json_code_fence_handles_closing_fence_attached_to_content():
+    text = '```json\n{"a": 1}```'
+    assert strip_json_code_fence(text) == '{"a": 1}'

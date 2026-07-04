@@ -75,7 +75,7 @@ def test_extract_job_posting_tie_breaking_guard_puts_everything_in_requirements(
     assert len(result.parsed_json["requirements"]) == 3
 
 
-def test_extract_job_posting_title_fabrication_guard(tmp_path):
+def test_extract_job_posting_title_fabrication_guard():
     """Title-fabrication guard (spec §3.2, §6): for a 'not a job posting'
     fixture, the persisted title must match the mocked orchestrator's honest
     placeholder byte-for-byte, proving jd_extractor.py doesn't substitute or

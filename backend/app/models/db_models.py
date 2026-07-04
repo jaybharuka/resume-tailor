@@ -128,3 +128,14 @@ class LLMCall(Base):
     validated = Column(Boolean, nullable=False, default=False)
     latency_ms = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+
+class GapAnalysis(Base):
+    __tablename__ = "gap_analyses"
+
+    id = Column(Integer, primary_key=True)
+    session_id = Column(Integer, ForeignKey("tailoring_sessions.id", ondelete="CASCADE"), nullable=False)
+    resume_version_id = Column(Integer, ForeignKey("resume_versions.id", ondelete="CASCADE"), nullable=False)
+    job_posting_id = Column(Integer, ForeignKey("job_postings.id", ondelete="CASCADE"), nullable=False)
+    analysis_json = Column(JSON, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
