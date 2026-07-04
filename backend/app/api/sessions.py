@@ -10,11 +10,13 @@ from app.core.llm.orchestrator_factory import build_orchestrator
 from app.core.llm.prompt_registry import PromptRegistry
 from app.core.storage import LocalDiskStorage
 from app.models.db_models import Resume, JobPosting, TailoringSession, PipelineRun, GeneratedDocument
-from app.services.resume_parser import parse_resume, ResumeParsingError
+from app.services.errors import StageExecutionError
+from app.services.resume_parser import parse_resume
+from app.services.jd_extractor import extract_job_posting
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
-RESUME_PARSING_TIMEOUT_SECONDS = 330
+STAGE_TIMEOUT_SECONDS = 330
 _STAGE_EXECUTOR = ThreadPoolExecutor(max_workers=4)
 
 
@@ -43,19 +45,43 @@ def create_session(request: CreateSessionRequest, db: Session = Depends(get_db))
     return {"id": session.id, "status": session.status}
 
 
+def _run_resume_parsing(db: Session, session: TailoringSession, settings) -> dict:
+    resume = db.get(Resume, session.resume_id)
+    storage = LocalDiskStorage(root=settings.storage_root)
+    orchestrator = build_orchestrator(db, session_id=session.id)
+    prompt_registry = PromptRegistry(prompts_root=settings.prompts_root)
+    version = parse_resume(db, resume, storage, orchestrator, prompt_registry)
+    return {"resume_version_id": version.id}
+
+
+def _run_jd_extraction(db: Session, session: TailoringSession, settings) -> dict:
+    job_posting = db.get(JobPosting, session.job_posting_id)
+    orchestrator = build_orchestrator(db, session_id=session.id)
+    prompt_registry = PromptRegistry(prompts_root=settings.prompts_root)
+    extract_job_posting(db, job_posting, orchestrator, prompt_registry)
+    return {"job_posting_id": job_posting.id}
+
+
+STAGE_RUNNERS = {
+    "resume_parsing": _run_resume_parsing,
+    "jd_extraction": _run_jd_extraction,
+}
+
+
 @router.post("/{session_id}/run-stage/{stage_name}")
 def run_stage(session_id: int, stage_name: str, db: Session = Depends(get_db)):
     session = db.get(TailoringSession, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail=f"session {session_id} not found")
 
-    if stage_name != "resume_parsing":
+    stage_runner = STAGE_RUNNERS.get(stage_name)
+    if stage_runner is None:
         raise HTTPException(
             status_code=501,
             detail=f"stage '{stage_name}' is not implemented yet (Phase 1 contract only)",
         )
 
-    resume = db.get(Resume, session.resume_id)
+    settings = get_settings()
     pipeline_run = PipelineRun(
         session_id=session_id, stage_name=stage_name, status="running", started_at=_utcnow(),
     )
@@ -66,22 +92,17 @@ def run_stage(session_id: int, stage_name: str, db: Session = Depends(get_db)):
     # timeout branch below never needs to read an attribute off the request-thread-bound
     # `pipeline_run` object after the worker thread may have started mutating shared state.
 
-    settings = get_settings()
-    storage = LocalDiskStorage(root=settings.storage_root)
-    orchestrator = build_orchestrator(db, session_id=session_id)
-    prompt_registry = PromptRegistry(prompts_root=settings.prompts_root)
-
-    future = _STAGE_EXECUTOR.submit(parse_resume, db, resume, storage, orchestrator, prompt_registry)
+    future = _STAGE_EXECUTOR.submit(stage_runner, db, session, settings)
 
     try:
-        version = future.result(timeout=RESUME_PARSING_TIMEOUT_SECONDS)
+        result = future.result(timeout=STAGE_TIMEOUT_SECONDS)
     except FutureTimeoutError:
-        # The worker thread is still running `parse_resume` in the background and cannot be
+        # The worker thread is still running the stage in the background and cannot be
         # forcibly cancelled — it may still commit against `db` after we give up waiting on it.
         # Touching the same `db` Session from this (the request) thread while that's possible
         # is unsafe (SQLAlchemy Sessions aren't safe for concurrent multi-thread use), so the
         # failure record below is written through a fresh, independent session instead of `db`.
-        error_message = f"resume_parsing timed out after {RESUME_PARSING_TIMEOUT_SECONDS} seconds"
+        error_message = f"{stage_name} timed out after {STAGE_TIMEOUT_SECONDS} seconds"
         fresh_db = make_session_factory(make_engine(settings.database_url))()
         try:
             fresh_run = fresh_db.get(PipelineRun, pipeline_run_id)
@@ -92,7 +113,7 @@ def run_stage(session_id: int, stage_name: str, db: Session = Depends(get_db)):
         finally:
             fresh_db.close()
         raise HTTPException(status_code=504, detail=error_message)
-    except ResumeParsingError as exc:
+    except StageExecutionError as exc:
         pipeline_run.status = "failed"
         pipeline_run.error_message = str(exc)
         pipeline_run.completed_at = _utcnow()
@@ -103,7 +124,7 @@ def run_stage(session_id: int, stage_name: str, db: Session = Depends(get_db)):
     pipeline_run.completed_at = _utcnow()
     db.commit()
 
-    return {"stage_name": stage_name, "status": "succeeded", "resume_version_id": version.id}
+    return {"stage_name": stage_name, "status": "succeeded", **result}
 
 
 @router.get("/{session_id}/status")

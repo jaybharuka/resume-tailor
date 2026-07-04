@@ -26,7 +26,7 @@ def test_run_stage_returns_501_for_unimplemented_stage(client, db_session):
     session_response = client.post("/sessions", json={"resume_id": resume.id, "job_posting_id": job.id})
     session_id = session_response.json()["id"]
 
-    response = client.post(f"/sessions/{session_id}/run-stage/jd_extraction")
+    response = client.post(f"/sessions/{session_id}/run-stage/tailoring_rewrite")
 
     assert response.status_code == 501
 
@@ -104,7 +104,7 @@ def test_run_stage_resume_parsing_times_out(client, db_session, monkeypatch):
         return FakeResumeVersion(id=99)
 
     monkeypatch.setattr(sessions_module, "parse_resume", slow_parse_resume)
-    monkeypatch.setattr(sessions_module, "RESUME_PARSING_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(sessions_module, "STAGE_TIMEOUT_SECONDS", 0.05)
 
     response = client.post(f"/sessions/{session_id}/run-stage/resume_parsing")
 
@@ -129,7 +129,7 @@ def test_run_stage_resume_parsing_times_out_uses_captured_run_id_not_stale_objec
         return FakeResumeVersion(id=99)
 
     monkeypatch.setattr(sessions_module, "parse_resume", slow_parse_resume_that_touches_shared_session)
-    monkeypatch.setattr(sessions_module, "RESUME_PARSING_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(sessions_module, "STAGE_TIMEOUT_SECONDS", 0.05)
 
     response = client.post(f"/sessions/{session_id}/run-stage/resume_parsing")
 
@@ -162,3 +162,90 @@ def test_get_status_returns_empty_pipeline_runs_in_phase_one(client, db_session)
 
     assert response.status_code == 200
     assert response.json()["pipeline_runs"] == []
+
+
+def test_run_stage_jd_extraction_succeeds(client, db_session, monkeypatch):
+    import app.api.sessions as sessions_module
+
+    resume = Resume(original_filename="resume.pdf", storage_path="/tmp/resume.pdf")
+    job = JobPosting(source_url="https://example.com/job", raw_text="Barista at Corner Cafe.")
+    db_session.add_all([resume, job])
+    db_session.commit()
+    session_response = client.post("/sessions", json={"resume_id": resume.id, "job_posting_id": job.id})
+    session_id = session_response.json()["id"]
+
+    def fake_extract_job_posting(db, job_posting, orchestrator, prompt_registry):
+        job_posting.parsed_json = {"title": "Barista"}
+        return job_posting
+
+    monkeypatch.setattr(sessions_module, "extract_job_posting", fake_extract_job_posting)
+
+    response = client.post(f"/sessions/{session_id}/run-stage/jd_extraction")
+
+    assert response.status_code == 200
+    assert response.json() == {"stage_name": "jd_extraction", "status": "succeeded", "job_posting_id": job.id}
+
+    status_response = client.get(f"/sessions/{session_id}/status")
+    runs = status_response.json()["pipeline_runs"]
+    assert len(runs) == 1
+    assert runs[0]["stage_name"] == "jd_extraction"
+    assert runs[0]["status"] == "succeeded"
+
+
+def test_run_stage_jd_extraction_reports_failure(client, db_session, monkeypatch):
+    import app.api.sessions as sessions_module
+    from app.services.jd_extractor import JDExtractionError
+
+    resume = Resume(original_filename="resume.pdf", storage_path="/tmp/resume.pdf")
+    job = JobPosting(source_url="https://example.com/job", raw_text="Barista at Corner Cafe.")
+    db_session.add_all([resume, job])
+    db_session.commit()
+    session_response = client.post("/sessions", json={"resume_id": resume.id, "job_posting_id": job.id})
+    session_id = session_response.json()["id"]
+
+    def failing_extract_job_posting(db, job_posting, orchestrator, prompt_registry):
+        raise JDExtractionError("no raw_text on this job posting to extract from")
+
+    monkeypatch.setattr(sessions_module, "extract_job_posting", failing_extract_job_posting)
+
+    response = client.post(f"/sessions/{session_id}/run-stage/jd_extraction")
+
+    assert response.status_code == 422
+
+    status_response = client.get(f"/sessions/{session_id}/status")
+    runs = status_response.json()["pipeline_runs"]
+    assert runs[0]["status"] == "failed"
+
+
+def test_run_stage_jd_extraction_times_out(client, db_session, monkeypatch):
+    import time
+    import app.api.sessions as sessions_module
+
+    resume = Resume(original_filename="resume.pdf", storage_path="/tmp/resume.pdf")
+    job = JobPosting(source_url="https://example.com/job", raw_text="Barista at Corner Cafe.")
+    db_session.add_all([resume, job])
+    db_session.commit()
+    session_response = client.post("/sessions", json={"resume_id": resume.id, "job_posting_id": job.id})
+    session_id = session_response.json()["id"]
+
+    def slow_extract_job_posting(db, job_posting, orchestrator, prompt_registry):
+        time.sleep(0.5)
+        job_posting.parsed_json = {"title": "Barista"}
+        return job_posting
+
+    monkeypatch.setattr(sessions_module, "extract_job_posting", slow_extract_job_posting)
+    monkeypatch.setattr(sessions_module, "STAGE_TIMEOUT_SECONDS", 0.05)
+
+    response = client.post(f"/sessions/{session_id}/run-stage/jd_extraction")
+
+    assert response.status_code == 504
+
+    # See test_run_stage_resume_parsing_times_out_uses_captured_run_id_not_stale_object for
+    # why this expire_all() is needed: the `client` fixture hands every request the same
+    # `db_session` object, and the timeout branch commits the failure through a separate
+    # `fresh_db` session, so `db_session`'s identity map needs to be told its cached
+    # `PipelineRun` is stale before re-reading it here.
+    db_session.expire_all()
+    status_response = client.get(f"/sessions/{session_id}/status")
+    runs = status_response.json()["pipeline_runs"]
+    assert runs[0]["status"] == "failed"
