@@ -62,6 +62,9 @@ def run_stage(session_id: int, stage_name: str, db: Session = Depends(get_db)):
     db.add(pipeline_run)
     db.commit()
     db.refresh(pipeline_run)
+    pipeline_run_id = pipeline_run.id  # captured before the background thread starts, so the
+    # timeout branch below never needs to read an attribute off the request-thread-bound
+    # `pipeline_run` object after the worker thread may have started mutating shared state.
 
     settings = get_settings()
     storage = LocalDiskStorage(root=settings.storage_root)
@@ -81,7 +84,7 @@ def run_stage(session_id: int, stage_name: str, db: Session = Depends(get_db)):
         error_message = f"resume_parsing timed out after {RESUME_PARSING_TIMEOUT_SECONDS} seconds"
         fresh_db = make_session_factory(make_engine(settings.database_url))()
         try:
-            fresh_run = fresh_db.get(PipelineRun, pipeline_run.id)
+            fresh_run = fresh_db.get(PipelineRun, pipeline_run_id)
             fresh_run.status = "failed"
             fresh_run.error_message = error_message
             fresh_run.completed_at = _utcnow()
