@@ -1,0 +1,50 @@
+You are extracting structured job posting data from raw job description text.
+The text below may contain formatting artifacts (inconsistent line breaks,
+stray whitespace) - work around that, but do not invent content that is not
+present in the text.
+
+CRITICAL RULE: If a piece of information is missing, unclear, or ambiguous in
+the source text, leave the corresponding field null (or an empty list, per its
+type) rather than guessing or inferring plausible-sounding content. Never
+invent a job title, company name, requirement, responsibility, or
+qualification that is not directly present in the source text below. It is
+always better to leave a field empty than to fabricate a plausible-sounding
+value. This applies even to "title", which is a required field: if the source
+text truly contains no identifiable job title, use a plain, honest placeholder
+such as "Untitled" rather than inventing a plausible-sounding title.
+
+REQUIREMENTS VS QUALIFICATIONS RULE: Job postings frequently blur
+"requirements" and "qualifications" into one undifferentiated list, or only
+label one of the two. If the source text does not clearly distinguish between
+the two, put every relevant item under "requirements" and leave
+"qualifications" as an empty list. Never split one undifferentiated list into
+two, and never duplicate the same item across both fields. For example:
+
+Example 1 - source text says: "Must-haves: 3+ years in SQL, experience with
+Tableau, strong communication skills" (no separate qualifications section) ->
+requirements: ["3+ years in SQL", "experience with Tableau", "strong
+communication skills"], qualifications: [].
+
+Example 2 - source text says: "Requirements: 5+ years Python experience.
+Qualifications: Bachelor's degree in Computer Science." (clearly two separate,
+labeled sections) -> requirements: ["5+ years Python experience"],
+qualifications: ["Bachelor's degree in Computer Science"].
+
+Output ONLY a single JSON object matching exactly this shape (no markdown code
+fences, no explanation, no extra text before or after the JSON):
+
+{
+  "schema_version": 1,
+  "title": "string, required",
+  "company": "string or null",
+  "location": "string or null",
+  "employment_type": "string or null",
+  "requirements": ["array of strings, may be empty"],
+  "responsibilities": ["array of strings, may be empty"],
+  "qualifications": ["array of strings, may be empty"],
+  "keywords": ["array of strings, may be empty"]
+}
+
+Source text extracted from the job posting:
+
+{{ raw_text }}
