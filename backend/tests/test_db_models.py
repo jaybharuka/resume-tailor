@@ -4,11 +4,11 @@ from sqlalchemy.exc import IntegrityError
 from app.core.db import make_engine, make_session_factory
 from app.models.db_models import (
     Base, Resume, ResumeVersion, JobPosting, TailoringSession,
-    PipelineRun, EvaluationRun, GeneratedDocument, PromptVersion, LLMCall,
+    PipelineRun, EvaluationRun, GeneratedDocument, PromptVersion, LLMCall, GapAnalysis,
 )
 
 
-def test_all_nine_tables_create_and_accept_a_linked_row():
+def test_all_tables_create_and_accept_a_linked_row():
     engine = make_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     SessionFactory = make_session_factory(engine)
@@ -44,7 +44,11 @@ def test_all_nine_tables_create_and_accept_a_linked_row():
             task_type="tailoring_rewrite", name="tailoring_rewrite", version="v1",
             template_path="prompts/tailoring_rewrite/v1.jinja2",
         )
-        db.add_all([pipeline_run, evaluation, document, prompt_version])
+        gap_analysis = GapAnalysis(
+            session_id=session.id, resume_version_id=version.id, job_posting_id=job.id,
+            analysis_json={"schema_version": 1, "matching_skills": ["Python"]},
+        )
+        db.add_all([pipeline_run, evaluation, document, prompt_version, gap_analysis])
         db.flush()
 
         llm_call = LLMCall(
@@ -59,6 +63,7 @@ def test_all_nine_tables_create_and_accept_a_linked_row():
         assert db.query(Resume).count() == 1
         assert db.query(LLMCall).count() == 1
         assert db.query(EvaluationRun).first().overall_score == 85.0
+        assert db.query(GapAnalysis).first().analysis_json["matching_skills"] == ["Python"]
 
 
 def test_deleting_a_session_cascades_to_its_dependent_rows():
@@ -97,7 +102,11 @@ def test_deleting_a_session_cascades_to_its_dependent_rows():
             task_type="tailoring_rewrite", name="tailoring_rewrite", version="v1",
             template_path="prompts/tailoring_rewrite/v1.jinja2",
         )
-        db.add_all([pipeline_run, evaluation, document, prompt_version])
+        gap_analysis = GapAnalysis(
+            session_id=session.id, resume_version_id=version.id, job_posting_id=job.id,
+            analysis_json={"schema_version": 1, "matching_skills": ["Python"]},
+        )
+        db.add_all([pipeline_run, evaluation, document, prompt_version, gap_analysis])
         db.flush()
 
         llm_call = LLMCall(
@@ -123,6 +132,7 @@ def test_deleting_a_session_cascades_to_its_dependent_rows():
         assert db.query(EvaluationRun).filter_by(session_id=session_id).count() == 0
         assert db.query(GeneratedDocument).filter_by(session_id=session_id).count() == 0
         assert db.query(LLMCall).filter_by(session_id=session_id).count() == 0
+        assert db.query(GapAnalysis).filter_by(session_id=session_id).count() == 0
 
         assert db.query(Resume).filter_by(id=resume_id).count() == 1
         assert db.query(JobPosting).filter_by(id=job_id).count() == 1
