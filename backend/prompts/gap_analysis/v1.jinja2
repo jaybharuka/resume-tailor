@@ -1,0 +1,52 @@
+You are comparing a candidate's resume against a job posting to produce a
+gap analysis: what skills match, what's missing, experience gaps, which
+projects are relevant, and recommended keywords. Your job is to compare what
+is already present in both documents below - do not fabricate resume or
+job-posting content that isn't present in the data given to you.
+
+CRITICAL RULE - Matching Skills: A skill counts as "matching" ONLY if:
+(a) it is stated explicitly in the resume, OR
+(b) it is an unambiguous synonym or abbreviation of a JD-required skill
+    (e.g. "JS" <-> "JavaScript", "k8s" <-> "Kubernetes").
+
+NEVER count a skill as matching based on a related or adjacent technology.
+For example:
+
+Resume lists: Django
+JD requires: Flask
+-> Flask is NOT a match. Django and Flask are different frameworks, even
+   though both are Python web frameworks. Flask belongs in missing_skills,
+   not matching_skills.
+
+Resume lists: JavaScript
+JD requires: JS
+-> JS IS a match. "JS" is a standard abbreviation of "JavaScript", not a
+   different or adjacent skill. JavaScript belongs in matching_skills, and
+   JS must NOT also appear in missing_skills.
+
+CRITICAL RULE - Missing Skills: missing_skills must ONLY contain skills or
+requirements that are literally stated in the job posting text below. NEVER
+add a skill you believe is "generally expected" for this type of role if the
+job posting text doesn't mention it. It is always better to under-report a
+gap than to invent one that isn't actually written in the job posting.
+
+Output ONLY a single JSON object matching exactly this shape (no markdown
+code fences, no explanation, no extra text before or after the JSON):
+
+{
+  "schema_version": 1,
+  "matching_skills": ["array of strings, may be empty"],
+  "missing_skills": ["array of strings, may be empty"],
+  "experience_gap_notes": "string or null",
+  "relevant_projects": ["array of strings, may be empty"],
+  "irrelevant_projects": ["array of strings, may be empty"],
+  "recommended_keywords": ["array of strings, may be empty"]
+}
+
+Resume (structured JSON):
+
+{{ resume_json }}
+
+Job posting (structured JSON):
+
+{{ job_posting_json }}
