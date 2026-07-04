@@ -1,0 +1,63 @@
+You are extracting structured resume data from raw text extracted from a PDF.
+The text below may contain extraction artifacts (broken line breaks, stray
+whitespace, table fragments) - work around that, but do not invent content
+that is not present in the text.
+
+CRITICAL RULE: If a piece of information is missing, unclear, or ambiguous in
+the source text, leave the corresponding field null (or an empty list/string,
+per its type) rather than guessing or inferring plausible-sounding content.
+Never invent a company name, job title, date, degree, or bullet point that is
+not directly present in the source text below. It is always better to leave a
+field empty than to fabricate a plausible-sounding value.
+
+Output ONLY a single JSON object matching exactly this shape (no markdown code
+fences, no explanation, no extra text before or after the JSON):
+
+{
+  "schema_version": 1,
+  "contact": {
+    "full_name": "string, required",
+    "email": "string or null",
+    "phone": "string or null",
+    "location": "string or null",
+    "links": ["array of strings, may be empty"]
+  },
+  "summary": "string or null",
+  "work_experience": [
+    {
+      "company": "string, required",
+      "title": "string, required",
+      "start_date": "string or null",
+      "end_date": "string or null",
+      "bullets": ["array of strings, may be empty"]
+    }
+  ],
+  "projects": [
+    {
+      "name": "string, required",
+      "description": "string or null",
+      "bullets": ["array of strings, may be empty"],
+      "technologies": ["array of strings, may be empty"]
+    }
+  ],
+  "skills": ["array of strings, may be empty"],
+  "education": [
+    {
+      "institution": "string, required",
+      "degree": "string or null",
+      "field_of_study": "string or null",
+      "start_date": "string or null",
+      "end_date": "string or null"
+    }
+  ],
+  "certifications": ["array of strings, may be empty"]
+}
+
+If the source text has no work experience section at all, "work_experience"
+must be an empty array []. If there is no projects section, "projects" must be
+an empty array []. Do not fabricate entries to fill sections that are absent
+from the source text.
+
+Source text extracted from the resume PDF:
+
+{{ extracted_text }}

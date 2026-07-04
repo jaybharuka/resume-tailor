@@ -19,7 +19,7 @@ class PromptRegistry:
                 continue
             for template_file in sorted(task_dir.glob("*.jinja2")):
                 version = template_file.stem
-                found.append((task_dir.name, version, str(template_file.relative_to(self.prompts_root))))
+                found.append((task_dir.name, version, template_file.relative_to(self.prompts_root).as_posix()))
         return found
 
     def sync_to_db(self, db: Session) -> int:
