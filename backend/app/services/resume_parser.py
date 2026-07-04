@@ -5,12 +5,13 @@ from app.core.storage import LocalDiskStorage
 from app.models.db_models import Resume, ResumeVersion
 from app.models.resume import ResumeDocument
 from app.services.pdf_extractor import extract_text_from_pdf, has_extractable_text
+from app.services.errors import StageExecutionError
 
 RESUME_PARSING_MODEL = "z-ai/glm-5.2"
 RESUME_PARSING_TEMPERATURE = 0.1
 
 
-class ResumeParsingError(Exception):
+class ResumeParsingError(StageExecutionError):
     """Raised when resume parsing fails, whether at extraction or LLM-structuring."""
 
 
