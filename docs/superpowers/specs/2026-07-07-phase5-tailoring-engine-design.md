@@ -60,26 +60,46 @@ The bullet-level index `[i]` refers to that bullet's position **in the final tai
 
 **4.2 Code-level skills/keywords validation guard** — new for this phase, because unearned skills are the one fabrication vector that's mechanically checkable without semantic judgment. After the orchestrator returns, the tailoring service collects every skill/technology named anywhere in the tailored output (the top-level `skills` list, plus every `technologies` entry within `projects`) and verifies each one already appears in the original `ResumeDocument` (its `skills` list, any work experience bullet text, or any project's `technologies`) or in `gap_analysis.matching_skills`. Any skill that fails this check causes the **entire run to be rejected** as a `TailoringError` — never silently stripped. Silently filtering would introduce the first place in this codebase where a service *mutates* LLM output post-hoc rather than persisting it verbatim or rejecting it wholesale; that would contradict the "service persists the orchestrator's output verbatim, never substitutes/embellishes" invariant Phase 2-4's fabrication-guard tests exist to prove. Rejecting the whole run keeps that invariant intact: either the run is trustworthy and gets persisted as-is, or it isn't and gets discarded.
 
-**4.3 Metric fabrication has no code-level check — this is a documented residual risk.** Unlike unearned skills (checkable against a finite list of known-true strings), a fabricated metric ("40% improvement") has no equivalent mechanical check: there is no closed set of "true numbers" to validate against, since a legitimately-present metric in the original resume is just as much a free-form number as a hallucinated one, and distinguishing them requires semantic understanding of whether *this specific number, in this specific context* was actually stated in the source. This phase does not attempt that check. Metric-fabrication prevention is enforced **by prompt discipline only**, and this is called out explicitly as a known gap: the "fabricated metric" fixture test (§7) is deliberately designed to be a **prompt-quality test**, not a service-layer guard test — it exists to catch prompt wording regressions (the prompt stops effectively discouraging invented metrics), not to prove any code-level enforcement, because none exists for this vector. If real-world use ever reveals the model fabricating metrics despite the prompt, closing this gap would require either a stricter generation constraint (e.g., requiring the model to echo back the exact source sentence a metric came from) or a separate numeric-provenance pass — out of scope for this phase.
+**4.3 Metric fabrication has no code-level check — this is a documented residual risk.** Unlike unearned skills (checkable against a finite list of known-true strings), a fabricated metric ("40% improvement") has no equivalent mechanical check: there is no closed set of "true numbers" to validate against, since a legitimately-present metric in the original resume is just as much a free-form number as a hallucinated one, and distinguishing them requires semantic understanding of whether *this specific number, in this specific context* was actually stated in the source. This phase does not attempt that check. Metric-fabrication prevention is enforced **by prompt discipline only**, and this is called out explicitly as a known gap: the "fabricated metric" fixture test (§8) is deliberately designed to be a **prompt-quality test**, not a service-layer guard test — it exists to catch prompt wording regressions (the prompt stops effectively discouraging invented metrics), not to prove any code-level enforcement, because none exists for this vector. If real-world use ever reveals the model fabricating metrics despite the prompt, closing this gap would require either a stricter generation constraint (e.g., requiring the model to echo back the exact source sentence a metric came from) or a separate numeric-provenance pass — out of scope for this phase.
 
-## 5. Data Flow & Three-Prerequisite Dependency Guard
+## 5. Orchestrator Response Schema — `TailoringResult`
+
+The model must supply both the rewritten resume *and* its own justification for each change in one structured call, since §3.3/§3.4's `TailoringChange.rationale` needs to capture the model's actual reasoning (e.g. "reordered because more relevant to this JD"), not just a mechanical code-generated diff description. This requires a new combined response schema, `backend/app/models/tailoring_result.py`, distinct from a plain `ResumeDocument`:
+
+```python
+class TailoringChangeRecord(BaseModel):
+    field_changed: str
+    original_text: Optional[str] = None
+    tailored_text: str
+    rationale: str
+
+
+class TailoringResult(BaseModel):
+    schema_version: int = CURRENT_TAILORING_RESULT_SCHEMA_VERSION
+    tailored_resume: ResumeDocument
+    changes: list[TailoringChangeRecord] = Field(default_factory=list)
+```
+
+`TailoringChangeRecord.field_changed` uses the identity-anchored path format from §3.4. The orchestrator call uses `response_schema=TailoringResult` (not `ResumeDocument`) — this is the schema that gets validated against the model's raw output, matching the same "structured response schema" mechanism Phases 2-4 already use, just with a richer top-level shape than a bare document.
+
+## 6. Data Flow & Three-Prerequisite Dependency Guard
 
 New `backend/app/services/tailoring_engine.py`, parallel to `gap_analyzer.py`. `TailoringError` inherits `StageExecutionError`, same as `GapAnalysisError`/`JDExtractionError`/`ResumeParsingError`.
 
-1. Look up the resume's version with `produced_by_stage="resume_parsing"` (the original parse — never a prior tailored version, see §6). If none exists, raise `TailoringError("resume_parsing has not succeeded for this session yet")`.
+1. Look up the resume's version with `produced_by_stage="resume_parsing"` (the original parse — never a prior tailored version, see §7). If none exists, raise `TailoringError("resume_parsing has not succeeded for this session yet")`.
 2. Look up `job_posting.parsed_json`. If null, raise `TailoringError("jd_extraction has not succeeded for this session yet")`.
 3. Look up the session's most recent `gap_analyses` row. If none exists, raise `TailoringError("gap_analysis has not succeeded for this session yet")`.
 4. All three checks happen before any orchestrator call, each with its own distinct message (matching Phase 4's two-prerequisite guard, extended to three).
-5. Render the `tailoring_rewrite` prompt with all three documents, call `AIOrchestrator` with `TaskConfig(task_type="tailoring_rewrite", provider="nvidia", model="z-ai/glm-5.2", temperature=0.1, response_schema=ResumeDocument, fallback_providers=[])`.
+5. Render the `tailoring_rewrite` prompt with all three documents, call `AIOrchestrator` with `TaskConfig(task_type="tailoring_rewrite", provider="nvidia", model="z-ai/glm-5.2", temperature=0.1, response_schema=TailoringResult, fallback_providers=[])`.
 6. On `OrchestratorError`: wrap as `TailoringError`.
-7. On success: run the §4.2 skills guard. If it fails, raise `TailoringError` naming the unearned skill — nothing is persisted.
-8. If the guard passes: compute the next `version_number` (§3.2), insert a new `resume_versions` row (`session_id` set, `produced_by_stage="tailoring_rewrite"`, `resume_json` = the tailored document), and insert one `TailoringChange` row per changed field (§3.3-3.4).
+7. On success: run the §4.2 skills guard against `result.output.tailored_resume`. If it fails, raise `TailoringError` naming the unearned skill — nothing is persisted.
+8. If the guard passes: compute the next `version_number` (§3.2), insert a new `resume_versions` row (`session_id` set, `produced_by_stage="tailoring_rewrite"`, `resume_json = result.output.tailored_resume.model_dump()`), and insert one `TailoringChange` row per entry in `result.output.changes` (§3.3-3.4) — a direct, verbatim persistence of the model's own reported changes, not a code-derived diff.
 
-## 6. Re-Tailoring Is Always a Fresh, Independent Attempt
+## 7. Re-Tailoring Is Always a Fresh, Independent Attempt
 
 **Re-running `tailoring_rewrite` for the same session always sources from the original `resume_parsing` version, never from a prior tailored version.** A second run produces a second, independent `resume_versions` row — not a refinement chained off the first tailored attempt. Each tailoring run is a clean rewrite of the same ground truth (the original parse), not an iterative polish of the model's own prior output. This is the intended behavior for now, not an oversight: it avoids compounding hallucination risk across generations (each rewrite would otherwise be rewriting another rewrite, and this phase's anti-fabrication guarantees would need to hold across N generations rather than just one), at the cost of not supporting "tighten this further" iterative refinement. **This is flagged for reconsideration if iterative refinement becomes a real product need later** — that would be a deliberate future decision (most likely: an explicit "refine mode" that opts into chaining, with its own guardrail analysis), not something to silently start doing by accident.
 
-## 7. Testing
+## 8. Testing
 
 - Fixture triples (original resume + JD + gap analysis) with known-bad mocked outputs to guard against, each with its own test:
   - **Fabricated metric** — mocked orchestrator returns a bullet containing an invented number not in the original resume. Per §4.3, this test is deliberately a **prompt-quality test** (asserting the prompt template contains the anti-metric-fabrication instruction and a worked example), not a service-layer rejection test, since no code-level guard exists to reject this case.
@@ -94,11 +114,11 @@ New `backend/app/services/tailoring_engine.py`, parallel to `gap_analyzer.py`. `
 - Unit tests mock the `AIOrchestrator` — no real API calls in the automated suite.
 - One manual smoke-test script against the real NVIDIA API.
 
-## 8. API Integration
+## 9. API Integration
 
 `STAGE_RUNNERS["tailoring_rewrite"] = _run_tailoring`, reusing the existing `ThreadPoolExecutor` + `STAGE_TIMEOUT_SECONDS` + fresh-session-on-timeout pattern unchanged. **`test_run_stage_returns_501_for_unimplemented_stage`** (which has posted to `tailoring_rewrite` as its "still unimplemented" example since Phase 2) must be updated to target a different, still-genuinely-unimplemented stage name (e.g. whatever Phase 6's stage will be called, or a clearly-fake placeholder name) since this phase implements `tailoring_rewrite` for real.
 
-## 9. Ledger Cleanup (folded into this phase, Task 1)
+## 10. Ledger Cleanup (folded into this phase, Task 1)
 
 Before starting the new tailoring-engine work, this phase's first task closes 3 more items from the cross-phase follow-up backlog:
 
@@ -108,10 +128,10 @@ Before starting the new tailoring-engine work, this phase's first task closes 3 
 
 The remaining 6 ledger items (resume_parsing fabrication test keyword-only check, `parse_resume` fabrication guard's narrow `projects == []` assertion, `Responsibilities:`/`Keywords:` fixture labels untested, schema roundtrip test's default `schema_version`, strict-match rule's clause (a) looseness, `test_analyze_gap_wraps_orchestrator_error`'s missing explicit assertion) stay deferred.
 
-## 10. Explicitly Out of Scope
+## 11. Explicitly Out of Scope
 
 - Any numeric/categorical match score (still Phase 6 — Hiring Agent evaluation).
 - Deleting/omitting entries the gap analysis marked irrelevant (§2 — deliberate, human judgment call).
 - A code-level metric-fabrication guard (§4.3 — deliberate, documented residual risk, prompt-only enforcement).
-- Iterative refinement / chaining off a prior tailored version (§6 — deliberate, revisit if it becomes a real product need).
+- Iterative refinement / chaining off a prior tailored version (§7 — deliberate, revisit if it becomes a real product need).
 - Any change to `resume_parsing`, `jd_extraction`, `gap_analysis`, the timeout/thread-safety design, or the orchestrator/provider layer beyond reusing them as-is.
