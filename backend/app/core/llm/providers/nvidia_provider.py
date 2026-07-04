@@ -2,7 +2,7 @@ import time
 from typing import Callable
 from openai import OpenAI
 from openai import APIStatusError, APIConnectionError, APITimeoutError
-from app.core.llm.provider import ProviderError
+from app.core.llm.provider import ProviderError, strip_json_code_fence
 from app.core.llm.retry import with_backoff
 
 
@@ -43,7 +43,7 @@ class NvidiaProvider:
                 max_tokens=16384,
                 seed=42,
             )
-            return completion.choices[0].message.content
+            return strip_json_code_fence(completion.choices[0].message.content)
 
         try:
             return with_backoff(

@@ -149,3 +149,24 @@ def test_api_key_never_appears_in_provider_error_message(monkeypatch):
         provider.generate("say hi", model="z-ai/glm-5.2", temperature=1.0)
 
     assert secret_key not in str(exc_info.value)
+
+
+def test_generate_strips_markdown_json_code_fence(monkeypatch):
+    class FencedCompletions:
+        def create(self, **kwargs):
+            return FakeCompletion('```json\n{"text": "hello from nvidia"}\n```')
+
+    class FencedChat:
+        def __init__(self):
+            self.completions = FencedCompletions()
+
+    class FencedOpenAIClient:
+        def __init__(self, base_url, api_key):
+            self.chat = FencedChat()
+
+    monkeypatch.setattr(nvidia_provider_module, "OpenAI", FencedOpenAIClient)
+
+    provider = NvidiaProvider(api_key="fake-key")
+    result = provider.generate("say hi", model="z-ai/glm-5.2", temperature=1.0)
+
+    assert result == '{"text": "hello from nvidia"}'
