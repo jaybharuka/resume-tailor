@@ -5,6 +5,7 @@ from app.core.db import make_engine, make_session_factory
 from app.models.db_models import (
     Base, Resume, ResumeVersion, JobPosting, TailoringSession,
     PipelineRun, EvaluationRun, GeneratedDocument, PromptVersion, LLMCall, GapAnalysis,
+    TailoringChange,
 )
 
 
@@ -31,6 +32,14 @@ def test_all_tables_create_and_accept_a_linked_row():
         db.add(session)
         db.flush()
 
+        tailored_version = ResumeVersion(
+            resume_id=resume.id, session_id=session.id, version_number=2,
+            resume_json={"schema_version": 1, "contact": {"full_name": "Jane"}},
+            produced_by_stage="tailoring_rewrite",
+        )
+        db.add(tailored_version)
+        db.flush()
+
         pipeline_run = PipelineRun(session_id=session.id, stage_name="resume_parsing", status="succeeded")
         evaluation = EvaluationRun(
             session_id=session.id, resume_version_id=version.id,
@@ -51,22 +60,29 @@ def test_all_tables_create_and_accept_a_linked_row():
         db.add_all([pipeline_run, evaluation, document, prompt_version, gap_analysis])
         db.flush()
 
+        tailoring_change = TailoringChange(
+            resume_version_id=tailored_version.id, field_changed="summary",
+            original_text="Old summary.", tailored_text="New summary.",
+            rationale="Emphasized backend experience.",
+        )
         llm_call = LLMCall(
             session_id=session.id, prompt_version_id=prompt_version.id,
             provider="gemini", model="gemini-1.5-flash", task_type="tailoring_rewrite",
             temperature=0.7, request_payload={"prompt": "hi"}, response_payload={"text": "hello"},
             validated=True, latency_ms=250,
         )
-        db.add(llm_call)
+        db.add_all([tailoring_change, llm_call])
         db.commit()
 
         assert db.query(Resume).count() == 1
         assert db.query(LLMCall).count() == 1
         assert db.query(EvaluationRun).first().overall_score == 85.0
         assert db.query(GapAnalysis).first().analysis_json["matching_skills"] == ["Python"]
+        assert db.query(TailoringChange).first().tailored_text == "New summary."
+        assert db.query(ResumeVersion).filter_by(id=tailored_version.id).one().session_id == session.id
 
 
-def test_deleting_a_session_cascades_to_its_dependent_rows():
+def test_deleting_a_session_cascades_to_its_dependent_rows_including_tailored_version():
     engine = make_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     SessionFactory = make_session_factory(engine)
@@ -89,6 +105,14 @@ def test_deleting_a_session_cascades_to_its_dependent_rows():
         db.add(session)
         db.flush()
 
+        tailored_version = ResumeVersion(
+            resume_id=resume.id, session_id=session.id, version_number=2,
+            resume_json={"schema_version": 1, "contact": {"full_name": "Jane"}},
+            produced_by_stage="tailoring_rewrite",
+        )
+        db.add(tailored_version)
+        db.flush()
+
         pipeline_run = PipelineRun(session_id=session.id, stage_name="resume_parsing", status="succeeded")
         evaluation = EvaluationRun(
             session_id=session.id, resume_version_id=version.id,
@@ -109,19 +133,25 @@ def test_deleting_a_session_cascades_to_its_dependent_rows():
         db.add_all([pipeline_run, evaluation, document, prompt_version, gap_analysis])
         db.flush()
 
+        tailoring_change = TailoringChange(
+            resume_version_id=tailored_version.id, field_changed="summary",
+            original_text="Old summary.", tailored_text="New summary.",
+            rationale="Emphasized backend experience.",
+        )
         llm_call = LLMCall(
             session_id=session.id, prompt_version_id=prompt_version.id,
             provider="gemini", model="gemini-1.5-flash", task_type="tailoring_rewrite",
             temperature=0.7, request_payload={"prompt": "hi"}, response_payload={"text": "hello"},
             validated=True, latency_ms=250,
         )
-        db.add(llm_call)
+        db.add_all([tailoring_change, llm_call])
         db.commit()
 
         session_id = session.id
         resume_id = resume.id
         job_id = job.id
         version_id = version.id
+        tailored_version_id = tailored_version.id
         prompt_version_id = prompt_version.id
 
         db.delete(session)
@@ -133,6 +163,8 @@ def test_deleting_a_session_cascades_to_its_dependent_rows():
         assert db.query(GeneratedDocument).filter_by(session_id=session_id).count() == 0
         assert db.query(LLMCall).filter_by(session_id=session_id).count() == 0
         assert db.query(GapAnalysis).filter_by(session_id=session_id).count() == 0
+        assert db.query(ResumeVersion).filter_by(id=tailored_version_id).count() == 0
+        assert db.query(TailoringChange).filter_by(resume_version_id=tailored_version_id).count() == 0
 
         assert db.query(Resume).filter_by(id=resume_id).count() == 1
         assert db.query(JobPosting).filter_by(id=job_id).count() == 1
