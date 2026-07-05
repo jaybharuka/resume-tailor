@@ -46,7 +46,7 @@ def test_all_tables_create_and_accept_a_linked_row():
             overall_score=85.0, raw_response_json={"overall_score": 85.0},
         )
         document = GeneratedDocument(
-            session_id=session.id, document_type="ats_report",
+            session_id=session.id, resume_version_id=version.id, document_type="ats_report",
             content="report body", version_number=1,
         )
         prompt_version = PromptVersion(
@@ -80,6 +80,7 @@ def test_all_tables_create_and_accept_a_linked_row():
         assert db.query(GapAnalysis).first().analysis_json["matching_skills"] == ["Python"]
         assert db.query(TailoringChange).first().tailored_text == "New summary."
         assert db.query(ResumeVersion).filter_by(id=tailored_version.id).one().session_id == session.id
+        assert db.query(GeneratedDocument).first().resume_version_id == version.id
 
 
 def test_deleting_a_session_cascades_to_its_dependent_rows_including_tailored_version():
@@ -119,7 +120,7 @@ def test_deleting_a_session_cascades_to_its_dependent_rows_including_tailored_ve
             overall_score=85.0, raw_response_json={"overall_score": 85.0},
         )
         document = GeneratedDocument(
-            session_id=session.id, document_type="ats_report",
+            session_id=session.id, resume_version_id=version.id, document_type="ats_report",
             content="report body", version_number=1,
         )
         prompt_version = PromptVersion(
