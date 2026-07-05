@@ -27,7 +27,13 @@ def test_gap_analysis_document_roundtrips_through_json():
         irrelevant_projects=["Weekend Recipe App"],
         recommended_keywords=["distributed systems"],
     )
-    restored = GapAnalysisDocument.model_validate_json(doc.model_dump_json())
+    serialized = doc.model_dump_json()
+    # Ledger item: confirm schema_version is genuinely present in the serialized
+    # JSON, not silently dropped and merely coincidentally reconstructed via its
+    # own default value on the restored side (which would make a naive
+    # restored == doc comparison pass even if the field were never serialized).
+    assert '"schema_version"' in serialized
+    restored = GapAnalysisDocument.model_validate_json(serialized)
     assert restored == doc
 
 

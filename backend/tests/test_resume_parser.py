@@ -97,6 +97,8 @@ def test_parse_resume_does_not_fabricate_missing_sections(tmp_path):
     version = parse_resume(db, resume, storage, orchestrator, prompt_registry)
 
     assert version.resume_json["projects"] == []
+    assert version.resume_json["education"] == []
+    assert version.resume_json["certifications"] == []
 
 
 def test_parse_resume_fails_fast_on_blank_pdf_without_calling_orchestrator(tmp_path):

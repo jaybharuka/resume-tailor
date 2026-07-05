@@ -117,6 +117,13 @@ def _validate_entries_preserved(original_resume_json: dict, tailored_resume_json
                 f"but never added or removed"
             )
 
+    # Won't-fix (documented, not a gap): certifications only gets the count check
+    # above, no identity-set check like projects/work_experience/education get
+    # below. Unlike those, a certification is a bare string with no natural
+    # identity key to compare on (no name/company+title/institution) - a
+    # same-count swap of one certification string for another wouldn't be
+    # caught here. Accepted for this phase; would need a different mechanism
+    # (e.g. treating certification order as significant) if this ever matters.
     original_project_names = {project["name"] for project in original_resume_json.get("projects", [])}
     tailored_project_names = {project["name"] for project in tailored_resume_json.get("projects", [])}
     if tailored_project_names != original_project_names:
