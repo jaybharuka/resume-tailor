@@ -28,6 +28,7 @@ class ResumeVersion(Base):
 
     id = Column(Integer, primary_key=True)
     resume_id = Column(Integer, ForeignKey("resumes.id", ondelete="CASCADE"), nullable=False)
+    session_id = Column(Integer, ForeignKey("tailoring_sessions.id", ondelete="CASCADE"), nullable=True)
     version_number = Column(Integer, nullable=False)
     resume_json = Column(JSON, nullable=False)
     produced_by_stage = Column(String, nullable=False)
@@ -138,4 +139,16 @@ class GapAnalysis(Base):
     resume_version_id = Column(Integer, ForeignKey("resume_versions.id", ondelete="CASCADE"), nullable=False)
     job_posting_id = Column(Integer, ForeignKey("job_postings.id", ondelete="CASCADE"), nullable=False)
     analysis_json = Column(JSON, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+
+class TailoringChange(Base):
+    __tablename__ = "tailoring_changes"
+
+    id = Column(Integer, primary_key=True)
+    resume_version_id = Column(Integer, ForeignKey("resume_versions.id", ondelete="CASCADE"), nullable=False)
+    field_changed = Column(String, nullable=False)
+    original_text = Column(Text, nullable=True)
+    tailored_text = Column(Text, nullable=False)
+    rationale = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)

@@ -29,7 +29,15 @@ def strip_json_code_fence(text: str) -> str:
 
     lines = stripped.splitlines()
     if lines and lines[0].startswith("```"):
-        lines = lines[1:]
+        first_line_rest = lines[0][3:]
+        if first_line_rest.lower().startswith("json"):
+            first_line_rest = first_line_rest[4:]
+        if first_line_rest.strip():
+            # Content attached to the opening fence line (e.g. '```json{"a": 1}') -
+            # keep it rather than dropping the whole line.
+            lines[0] = first_line_rest
+        else:
+            lines = lines[1:]
     if lines:
         last = lines[-1].rstrip()
         if last == "```":
