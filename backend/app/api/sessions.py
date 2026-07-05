@@ -1,5 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from datetime import datetime, timezone
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -15,6 +16,7 @@ from app.services.resume_parser import parse_resume
 from app.services.jd_extractor import extract_job_posting
 from app.services.gap_analyzer import analyze_gap
 from app.services.tailoring_engine import tailor_resume
+from app.services.evaluator import evaluate_resume
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -78,11 +80,18 @@ def _run_tailoring(db: Session, session: TailoringSession, settings) -> dict:
     return {"resume_version_id": tailored_version.id}
 
 
+def _run_evaluation(db: Session, session: TailoringSession, settings) -> dict:
+    with httpx.Client(timeout=300.0) as http_client:
+        evaluation = evaluate_resume(db, session, http_client, settings)
+    return {"evaluation_run_id": evaluation.id}
+
+
 STAGE_RUNNERS = {
     "resume_parsing": _run_resume_parsing,
     "jd_extraction": _run_jd_extraction,
     "gap_analysis": _run_gap_analysis,
     "tailoring_rewrite": _run_tailoring,
+    "evaluation": _run_evaluation,
 }
 
 

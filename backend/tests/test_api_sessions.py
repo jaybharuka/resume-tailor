@@ -26,7 +26,7 @@ def test_run_stage_returns_501_for_unimplemented_stage(client, db_session):
     session_response = client.post("/sessions", json={"resume_id": resume.id, "job_posting_id": job.id})
     session_id = session_response.json()["id"]
 
-    response = client.post(f"/sessions/{session_id}/run-stage/evaluation")
+    response = client.post(f"/sessions/{session_id}/run-stage/document_generation")
 
     assert response.status_code == 501
 
@@ -428,6 +428,98 @@ def test_run_stage_tailoring_rewrite_times_out(client, db_session, monkeypatch):
     monkeypatch.setattr(sessions_module, "STAGE_TIMEOUT_SECONDS", 0.05)
 
     response = client.post(f"/sessions/{session_id}/run-stage/tailoring_rewrite")
+
+    assert response.status_code == 504
+
+    # See test_run_stage_resume_parsing_times_out_uses_captured_run_id_not_stale_object
+    # for why this expire_all() is needed: the `client` fixture hands every request
+    # the same `db_session` object, and the timeout branch commits the failure
+    # through a separate `fresh_db` session.
+    db_session.expire_all()
+    status_response = client.get(f"/sessions/{session_id}/status")
+    runs = status_response.json()["pipeline_runs"]
+    assert runs[0]["status"] == "failed"
+
+
+def test_run_stage_evaluation_succeeds(client, db_session, monkeypatch):
+    import app.api.sessions as sessions_module
+
+    resume = Resume(original_filename="resume.pdf", storage_path="/tmp/resume.pdf")
+    job = JobPosting(source_url="https://example.com/job", raw_text="Barista at Corner Cafe.")
+    db_session.add_all([resume, job])
+    db_session.commit()
+    session_response = client.post("/sessions", json={"resume_id": resume.id, "job_posting_id": job.id})
+    session_id = session_response.json()["id"]
+
+    class FakeEvaluationRun:
+        def __init__(self, id):
+            self.id = id
+
+    def fake_evaluate_resume(db, session, http_client, settings):
+        return FakeEvaluationRun(id=5)
+
+    monkeypatch.setattr(sessions_module, "evaluate_resume", fake_evaluate_resume)
+
+    response = client.post(f"/sessions/{session_id}/run-stage/evaluation")
+
+    assert response.status_code == 200
+    assert response.json() == {"stage_name": "evaluation", "status": "succeeded", "evaluation_run_id": 5}
+
+    status_response = client.get(f"/sessions/{session_id}/status")
+    runs = status_response.json()["pipeline_runs"]
+    assert len(runs) == 1
+    assert runs[0]["stage_name"] == "evaluation"
+    assert runs[0]["status"] == "succeeded"
+
+
+def test_run_stage_evaluation_reports_failure(client, db_session, monkeypatch):
+    import app.api.sessions as sessions_module
+    from app.services.evaluator import EvaluationError
+
+    resume = Resume(original_filename="resume.pdf", storage_path="/tmp/resume.pdf")
+    job = JobPosting(source_url="https://example.com/job")
+    db_session.add_all([resume, job])
+    db_session.commit()
+    session_response = client.post("/sessions", json={"resume_id": resume.id, "job_posting_id": job.id})
+    session_id = session_response.json()["id"]
+
+    def failing_evaluate_resume(db, session, http_client, settings):
+        raise EvaluationError("tailoring_rewrite has not succeeded for this session yet")
+
+    monkeypatch.setattr(sessions_module, "evaluate_resume", failing_evaluate_resume)
+
+    response = client.post(f"/sessions/{session_id}/run-stage/evaluation")
+
+    assert response.status_code == 422
+
+    status_response = client.get(f"/sessions/{session_id}/status")
+    runs = status_response.json()["pipeline_runs"]
+    assert runs[0]["status"] == "failed"
+
+
+def test_run_stage_evaluation_times_out(client, db_session, monkeypatch):
+    import time
+    import app.api.sessions as sessions_module
+
+    resume = Resume(original_filename="resume.pdf", storage_path="/tmp/resume.pdf")
+    job = JobPosting(source_url="https://example.com/job")
+    db_session.add_all([resume, job])
+    db_session.commit()
+    session_response = client.post("/sessions", json={"resume_id": resume.id, "job_posting_id": job.id})
+    session_id = session_response.json()["id"]
+
+    class FakeEvaluationRun:
+        def __init__(self, id):
+            self.id = id
+
+    def slow_evaluate_resume(db, session, http_client, settings):
+        time.sleep(0.5)
+        return FakeEvaluationRun(id=1)
+
+    monkeypatch.setattr(sessions_module, "evaluate_resume", slow_evaluate_resume)
+    monkeypatch.setattr(sessions_module, "STAGE_TIMEOUT_SECONDS", 0.05)
+
+    response = client.post(f"/sessions/{session_id}/run-stage/evaluation")
 
     assert response.status_code == 504
 
