@@ -14,6 +14,7 @@ from app.services.errors import StageExecutionError
 from app.services.resume_parser import parse_resume
 from app.services.jd_extractor import extract_job_posting
 from app.services.gap_analyzer import analyze_gap
+from app.services.tailoring_engine import tailor_resume
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -70,10 +71,18 @@ def _run_gap_analysis(db: Session, session: TailoringSession, settings) -> dict:
     return {"gap_analysis_id": analysis.id}
 
 
+def _run_tailoring(db: Session, session: TailoringSession, settings) -> dict:
+    orchestrator = build_orchestrator(db, session_id=session.id)
+    prompt_registry = PromptRegistry(prompts_root=settings.prompts_root)
+    tailored_version = tailor_resume(db, session, orchestrator, prompt_registry)
+    return {"resume_version_id": tailored_version.id}
+
+
 STAGE_RUNNERS = {
     "resume_parsing": _run_resume_parsing,
     "jd_extraction": _run_jd_extraction,
     "gap_analysis": _run_gap_analysis,
+    "tailoring_rewrite": _run_tailoring,
 }
 
 
