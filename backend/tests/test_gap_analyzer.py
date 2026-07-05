@@ -162,3 +162,5 @@ def test_analyze_gap_wraps_orchestrator_error():
 
     with pytest.raises(GapAnalysisError):
         analyze_gap(db, session, orchestrator, prompt_registry)
+
+    assert len(orchestrator.calls) == 1

@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./resume_tailor.db"
     storage_root: str = "./storage"
     prompts_root: str = "./prompts"
+    latex_templates_root: str = "./latex_templates"
     gemini_api_key: str | None = None
     nvidia_api_key: str | None = None
     nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"

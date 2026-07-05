@@ -1,0 +1,73 @@
+\documentclass[11pt]{article}
+\usepackage[margin=0.75in]{geometry}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\pagestyle{empty}
+
+\begin{document}
+
+\begin{center}
+{\LARGE \textbf{<< resume.contact.full_name | latex_escape >>}}
+<% if contact_line_parts %>\\[4pt]
+<< contact_line_parts | join(" | ") | latex_escape >>
+<% endif %>
+<% if resume.contact.links %>\\[2pt]
+<< resume.contact.links | join(" | ") | latex_escape >>
+<% endif %>
+\end{center}
+
+<% if resume.summary %>
+\section*{Summary}
+<< resume.summary | latex_escape >>
+<% endif %>
+
+<% if resume.work_experience %>
+\section*{Experience}
+<% for entry in resume.work_experience %>
+\textbf{<< entry.title | latex_escape >>} at \textbf{<< entry.company | latex_escape >>} \hfill << entry.start_date | latex_escape >> -- << entry.end_date | latex_escape >>
+<% if entry.bullets %>
+\begin{itemize}[leftmargin=*, noitemsep]
+<% for bullet in entry.bullets %>\item << bullet | latex_escape >>
+<% endfor %>
+\end{itemize}
+<% endif %>
+<% endfor %>
+<% endif %>
+
+<% if resume.projects %>
+\section*{Projects}
+<% for project in resume.projects %>
+\textbf{<< project.name | latex_escape >>}<% if project.description %> -- << project.description | latex_escape >><% endif %>
+<% if project.bullets %>
+\begin{itemize}[leftmargin=*, noitemsep]
+<% for bullet in project.bullets %>\item << bullet | latex_escape >>
+<% endfor %>
+\end{itemize}
+<% endif %>
+<% if project.technologies %>
+\textit{Technologies: << project.technologies | join(", ") | latex_escape >>}
+<% endif %>
+<% endfor %>
+<% endif %>
+
+<% if resume.skills %>
+\section*{Skills}
+<< resume.skills | join(", ") | latex_escape >>
+<% endif %>
+
+<% if resume.education %>
+\section*{Education}
+<% for entry in resume.education %>
+\textbf{<< entry.institution | latex_escape >>}<% if entry.degree %>, << entry.degree | latex_escape >><% endif %><% if entry.field_of_study %>, << entry.field_of_study | latex_escape >><% endif %> \hfill << entry.start_date | latex_escape >> -- << entry.end_date | latex_escape >>
+<% endfor %>
+<% endif %>
+
+<% if resume.certifications %>
+\section*{Certifications}
+\begin{itemize}[leftmargin=*, noitemsep]
+<% for cert in resume.certifications %>\item << cert | latex_escape >>
+<% endfor %>
+\end{itemize}
+<% endif %>
+
+\end{document}

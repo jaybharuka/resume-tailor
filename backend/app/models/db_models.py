@@ -93,6 +93,7 @@ class GeneratedDocument(Base):
 
     id = Column(Integer, primary_key=True)
     session_id = Column(Integer, ForeignKey("tailoring_sessions.id", ondelete="CASCADE"), nullable=False)
+    resume_version_id = Column(Integer, ForeignKey("resume_versions.id", ondelete="CASCADE"), nullable=True)
     document_type = Column(String, nullable=False)
     storage_path = Column(String, nullable=True)
     content = Column(Text, nullable=True)

@@ -17,6 +17,8 @@ from app.services.jd_extractor import extract_job_posting
 from app.services.gap_analyzer import analyze_gap
 from app.services.tailoring_engine import tailor_resume
 from app.services.evaluator import evaluate_resume
+from app.services.latex_renderer import LatexRenderer
+from app.services.document_generator import generate_document, _compile_latex_to_pdf
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -86,12 +88,20 @@ def _run_evaluation(db: Session, session: TailoringSession, settings) -> dict:
     return {"evaluation_run_id": evaluation.id}
 
 
+def _run_document_generation(db: Session, session: TailoringSession, settings) -> dict:
+    storage = LocalDiskStorage(root=settings.storage_root)
+    latex_renderer = LatexRenderer(templates_root=settings.latex_templates_root)
+    document = generate_document(db, session, storage, latex_renderer, _compile_latex_to_pdf)
+    return {"generated_document_id": document.id}
+
+
 STAGE_RUNNERS = {
     "resume_parsing": _run_resume_parsing,
     "jd_extraction": _run_jd_extraction,
     "gap_analysis": _run_gap_analysis,
     "tailoring_rewrite": _run_tailoring,
     "evaluation": _run_evaluation,
+    "document_generation": _run_document_generation,
 }
 
 
