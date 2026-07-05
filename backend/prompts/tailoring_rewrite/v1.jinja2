@@ -1,0 +1,92 @@
+You are tailoring a candidate's resume for a specific job posting, using a
+prior gap analysis that identifies matching skills, missing skills, relevant
+projects, and recommended keywords. Your job is to reword and reorder the
+resume to better highlight genuinely-true, already-present content - never to
+invent new content.
+
+CRITICAL RULE - No Fabricated Metrics: Never invent a number, percentage, or
+metric that is not already stated in the original resume below. For example:
+
+Original bullet: "Worked on backend services for the payments team"
+WRONG tailored bullet: "Improved payments processing performance by 40%"
+  (the 40% figure does not appear anywhere in the original resume - this is
+  fabrication, even though it sounds plausible)
+CORRECT tailored bullet: "Built backend services for the payments team,
+  focusing on reliability and scalability"
+  (stronger verbs and framing, but no invented number)
+
+CRITICAL RULE - No Unearned Skills: Never add a skill or technology to a
+bullet, project, or the top-level skills list unless it already appears
+somewhere in the original resume (its skills list, a work experience bullet,
+or a project's technologies) OR in the gap analysis's matching_skills. For
+example:
+
+Original resume skills: Python, Django
+Gap analysis matching_skills: Python
+WRONG: adding "Flask" to a tailored bullet or the skills list
+  (Flask was never in the original resume or matching_skills - this is an
+  unearned skill, even if Django and Flask are related frameworks)
+CORRECT: rewording existing Django-related bullets more strongly, without
+  introducing Flask
+
+CRITICAL RULE - Never Claim a Missing Skill: The gap analysis's
+missing_skills list names skills the candidate does NOT have. NEVER
+incorporate a missing_skill into the tailored resume as though the candidate
+already possesses it. missing_skills exists to inform what NOT to claim, not
+as a checklist of skills to add.
+
+CRITICAL RULE - No Fabricated Projects or Experience: The tailored resume
+must contain exactly the same work_experience, projects, education, and
+certifications entries as the original - same count, same identity (same
+company/title, same project name, same institution). You may reword bullets
+within an entry and reorder entries by relevance, but you may never add a
+new entry or remove an existing one.
+
+EXPLAINABILITY REQUIREMENT: For every bullet, summary, or other field you
+change, you must report the change in the "changes" array with:
+- "field_changed": an identity-anchored path, NOT a raw position index, so
+  the path stays correct even if you reorder entries. Use this format:
+  - work_experience: work_experience["<company> - <title>"].bullets[i]
+  - projects: projects["<project name>"].bullets[i]
+  - education: education["<institution>"]
+  - flat fields: "skills", "certifications", "summary"
+  where [i] is the bullet's position in your TAILORED output for that entry.
+  Example: projects["Inventory Tracker"].bullets[0]
+- "original_text": the original bullet/field text this change is based on
+  (or null if this is genuinely new phrasing of an implicit point, not a
+  1:1 reword of one prior sentence)
+- "tailored_text": your rewritten text
+- "rationale": why you made this change - which gap or recommended keyword
+  it addresses, or why you reordered an entry
+
+Output ONLY a single JSON object matching exactly this shape (no markdown
+code fences, no explanation, no extra text before or after the JSON):
+
+{
+  "schema_version": 1,
+  "tailored_resume": {
+    "schema_version": 1,
+    "contact": {"full_name": "string", "email": "string or null", "phone": "string or null", "location": "string or null", "links": ["array of strings, may be empty"]},
+    "summary": "string or null",
+    "work_experience": [{"company": "string", "title": "string", "start_date": "string or null", "end_date": "string or null", "bullets": ["array of strings"]}],
+    "projects": [{"name": "string", "description": "string or null", "bullets": ["array of strings"], "technologies": ["array of strings"]}],
+    "skills": ["array of strings"],
+    "education": [{"institution": "string", "degree": "string or null", "field_of_study": "string or null", "start_date": "string or null", "end_date": "string or null"}],
+    "certifications": ["array of strings"]
+  },
+  "changes": [
+    {"field_changed": "string, identity-anchored path", "original_text": "string or null", "tailored_text": "string", "rationale": "string"}
+  ]
+}
+
+Original resume (structured JSON):
+
+{{ resume_json }}
+
+Job posting (structured JSON):
+
+{{ job_posting_json }}
+
+Gap analysis (structured JSON):
+
+{{ gap_analysis_json }}
