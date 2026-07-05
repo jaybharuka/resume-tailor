@@ -362,6 +362,198 @@ def test_tailor_resume_re_tailoring_is_independent_fresh_attempt():
     assert orchestrator.calls[0][1] == orchestrator.calls[1][1]
 
 
+def test_tailor_resume_rejects_react_when_only_react_native_mentioned_in_bullet():
+    """Tokenized skill-matching regression test: 'React Native' being mentioned
+    in prose must NOT count as earning the DISTINCT skill 'React' - a raw
+    substring check would incorrectly match "React" inside "React Native"."""
+    db = _make_db()
+    resume_doc, job_posting_doc, gap_analysis_doc = base_tailoring_triple()
+    resume_doc = resume_doc.model_copy(deep=True)
+    resume_doc.work_experience[0].bullets = ["Built cross-platform apps with React Native"]
+
+    session, original_version, job_posting, gap_analysis = _make_session_with_all_prerequisites(
+        db, resume_doc.model_dump(), job_posting_doc.model_dump(), gap_analysis_doc.model_dump(),
+    )
+
+    tailored_resume = resume_doc.model_copy(deep=True)
+    tailored_resume.skills = tailored_resume.skills + ["React"]
+    result_document = TailoringResult(
+        tailored_resume=tailored_resume,
+        changes=[
+            TailoringChangeRecord(
+                field_changed="skills", original_text=None, tailored_text="React", rationale="Added React.",
+            ),
+        ],
+    )
+    orchestrator = FakeOrchestrator(result=OrchestratorResult(output=result_document, provider_used="nvidia", attempts=1))
+    prompt_registry = PromptRegistry(prompts_root="prompts")
+
+    with pytest.raises(TailoringError, match="React"):
+        tailor_resume(db, session, orchestrator, prompt_registry)
+
+    assert db.query(ResumeVersion).filter_by(produced_by_stage="tailoring_rewrite").count() == 0
+
+
+def test_tailor_resume_accepts_react_native_when_mentioned_verbatim_in_bullet():
+    """The exact compound phrase 'React Native' IS earned when it's genuinely
+    the phrase mentioned - proving the tokenized matcher isn't overcorrecting
+    into rejecting legitimate multi-word skill mentions."""
+    db = _make_db()
+    resume_doc, job_posting_doc, gap_analysis_doc = base_tailoring_triple()
+    resume_doc = resume_doc.model_copy(deep=True)
+    resume_doc.work_experience[0].bullets = ["Built cross-platform apps with React Native"]
+
+    session, original_version, job_posting, gap_analysis = _make_session_with_all_prerequisites(
+        db, resume_doc.model_dump(), job_posting_doc.model_dump(), gap_analysis_doc.model_dump(),
+    )
+
+    tailored_resume = resume_doc.model_copy(deep=True)
+    tailored_resume.skills = tailored_resume.skills + ["React Native"]
+    result_document = TailoringResult(
+        tailored_resume=tailored_resume,
+        changes=[
+            TailoringChangeRecord(
+                field_changed="skills", original_text=None, tailored_text="React Native",
+                rationale="Added React Native.",
+            ),
+        ],
+    )
+    orchestrator = FakeOrchestrator(result=OrchestratorResult(output=result_document, provider_used="nvidia", attempts=1))
+    prompt_registry = PromptRegistry(prompts_root="prompts")
+
+    tailored_version = tailor_resume(db, session, orchestrator, prompt_registry)
+
+    assert "React Native" in tailored_version.resume_json["skills"]
+
+
+def test_tailor_resume_accepts_react_when_mentioned_standalone_elsewhere():
+    """'React' earned via prose when it genuinely appears on its own (not
+    merely as the first word of a distinct 'React Native' mention elsewhere
+    in the same bullet set) - proving the fix isn't overcorrecting into
+    always rejecting 'React' whenever 'React Native' is also present."""
+    db = _make_db()
+    resume_doc, job_posting_doc, gap_analysis_doc = base_tailoring_triple()
+    resume_doc = resume_doc.model_copy(deep=True)
+    resume_doc.work_experience[0].bullets = [
+        "Built web apps using React",
+        "Also built a mobile app using React Native",
+    ]
+
+    session, original_version, job_posting, gap_analysis = _make_session_with_all_prerequisites(
+        db, resume_doc.model_dump(), job_posting_doc.model_dump(), gap_analysis_doc.model_dump(),
+    )
+
+    tailored_resume = resume_doc.model_copy(deep=True)
+    tailored_resume.skills = tailored_resume.skills + ["React"]
+    result_document = TailoringResult(
+        tailored_resume=tailored_resume,
+        changes=[
+            TailoringChangeRecord(
+                field_changed="skills", original_text=None, tailored_text="React", rationale="Added React.",
+            ),
+        ],
+    )
+    orchestrator = FakeOrchestrator(result=OrchestratorResult(output=result_document, provider_used="nvidia", attempts=1))
+    prompt_registry = PromptRegistry(prompts_root="prompts")
+
+    tailored_version = tailor_resume(db, session, orchestrator, prompt_registry)
+
+    assert "React" in tailored_version.resume_json["skills"]
+
+
+def test_tailor_resume_rejects_java_when_only_javascript_mentioned_in_bullet():
+    """'JavaScript' in prose must not earn the DISTINCT skill 'Java' - a raw
+    substring check would incorrectly match "Java" inside "JavaScript"."""
+    db = _make_db()
+    resume_doc, job_posting_doc, gap_analysis_doc = base_tailoring_triple()
+    resume_doc = resume_doc.model_copy(deep=True)
+    resume_doc.work_experience[0].bullets = ["Built interactive UIs using JavaScript"]
+
+    session, original_version, job_posting, gap_analysis = _make_session_with_all_prerequisites(
+        db, resume_doc.model_dump(), job_posting_doc.model_dump(), gap_analysis_doc.model_dump(),
+    )
+
+    tailored_resume = resume_doc.model_copy(deep=True)
+    tailored_resume.skills = tailored_resume.skills + ["Java"]
+    result_document = TailoringResult(
+        tailored_resume=tailored_resume,
+        changes=[
+            TailoringChangeRecord(
+                field_changed="skills", original_text=None, tailored_text="Java", rationale="Added Java.",
+            ),
+        ],
+    )
+    orchestrator = FakeOrchestrator(result=OrchestratorResult(output=result_document, provider_used="nvidia", attempts=1))
+    prompt_registry = PromptRegistry(prompts_root="prompts")
+
+    with pytest.raises(TailoringError, match="Java"):
+        tailor_resume(db, session, orchestrator, prompt_registry)
+
+    assert db.query(ResumeVersion).filter_by(produced_by_stage="tailoring_rewrite").count() == 0
+
+
+def test_tailor_resume_rejects_c_when_only_cpp_and_csharp_mentioned_in_bullet():
+    """'C++'/'C#' in prose must not earn the DISTINCT skill 'C' - a raw
+    substring check would incorrectly match "C" inside both "C++" and "C#"."""
+    db = _make_db()
+    resume_doc, job_posting_doc, gap_analysis_doc = base_tailoring_triple()
+    resume_doc = resume_doc.model_copy(deep=True)
+    resume_doc.work_experience[0].bullets = ["Wrote performance-critical code in C++ and C#"]
+
+    session, original_version, job_posting, gap_analysis = _make_session_with_all_prerequisites(
+        db, resume_doc.model_dump(), job_posting_doc.model_dump(), gap_analysis_doc.model_dump(),
+    )
+
+    tailored_resume = resume_doc.model_copy(deep=True)
+    tailored_resume.skills = tailored_resume.skills + ["C"]
+    result_document = TailoringResult(
+        tailored_resume=tailored_resume,
+        changes=[
+            TailoringChangeRecord(
+                field_changed="skills", original_text=None, tailored_text="C", rationale="Added C.",
+            ),
+        ],
+    )
+    orchestrator = FakeOrchestrator(result=OrchestratorResult(output=result_document, provider_used="nvidia", attempts=1))
+    prompt_registry = PromptRegistry(prompts_root="prompts")
+
+    with pytest.raises(TailoringError, match=r"'C'"):
+        tailor_resume(db, session, orchestrator, prompt_registry)
+
+    assert db.query(ResumeVersion).filter_by(produced_by_stage="tailoring_rewrite").count() == 0
+
+
+def test_tailor_resume_accepts_cpp_when_mentioned_verbatim_in_bullet():
+    """'C++' is earned when it's genuinely the token mentioned, proving the
+    tokenizer keeps symbol-suffixed tech names (C++, C#) intact as single
+    tokens rather than fragmenting them."""
+    db = _make_db()
+    resume_doc, job_posting_doc, gap_analysis_doc = base_tailoring_triple()
+    resume_doc = resume_doc.model_copy(deep=True)
+    resume_doc.work_experience[0].bullets = ["Wrote performance-critical code in C++"]
+
+    session, original_version, job_posting, gap_analysis = _make_session_with_all_prerequisites(
+        db, resume_doc.model_dump(), job_posting_doc.model_dump(), gap_analysis_doc.model_dump(),
+    )
+
+    tailored_resume = resume_doc.model_copy(deep=True)
+    tailored_resume.skills = tailored_resume.skills + ["C++"]
+    result_document = TailoringResult(
+        tailored_resume=tailored_resume,
+        changes=[
+            TailoringChangeRecord(
+                field_changed="skills", original_text=None, tailored_text="C++", rationale="Added C++.",
+            ),
+        ],
+    )
+    orchestrator = FakeOrchestrator(result=OrchestratorResult(output=result_document, provider_used="nvidia", attempts=1))
+    prompt_registry = PromptRegistry(prompts_root="prompts")
+
+    tailored_version = tailor_resume(db, session, orchestrator, prompt_registry)
+
+    assert "C++" in tailored_version.resume_json["skills"]
+
+
 def test_tailor_resume_wraps_orchestrator_error():
     db = _make_db()
     resume_doc, job_posting_doc, gap_analysis_doc = base_tailoring_triple()
