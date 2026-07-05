@@ -26,7 +26,7 @@ def test_run_stage_returns_501_for_unimplemented_stage(client, db_session):
     session_response = client.post("/sessions", json={"resume_id": resume.id, "job_posting_id": job.id})
     session_id = session_response.json()["id"]
 
-    response = client.post(f"/sessions/{session_id}/run-stage/document_generation")
+    response = client.post(f"/sessions/{session_id}/run-stage/cover_letter_generation")
 
     assert response.status_code == 501
 
@@ -520,6 +520,98 @@ def test_run_stage_evaluation_times_out(client, db_session, monkeypatch):
     monkeypatch.setattr(sessions_module, "STAGE_TIMEOUT_SECONDS", 0.05)
 
     response = client.post(f"/sessions/{session_id}/run-stage/evaluation")
+
+    assert response.status_code == 504
+
+    # See test_run_stage_resume_parsing_times_out_uses_captured_run_id_not_stale_object
+    # for why this expire_all() is needed: the `client` fixture hands every request
+    # the same `db_session` object, and the timeout branch commits the failure
+    # through a separate `fresh_db` session.
+    db_session.expire_all()
+    status_response = client.get(f"/sessions/{session_id}/status")
+    runs = status_response.json()["pipeline_runs"]
+    assert runs[0]["status"] == "failed"
+
+
+def test_run_stage_document_generation_succeeds(client, db_session, monkeypatch):
+    import app.api.sessions as sessions_module
+
+    resume = Resume(original_filename="resume.pdf", storage_path="/tmp/resume.pdf")
+    job = JobPosting(source_url="https://example.com/job", raw_text="Barista at Corner Cafe.")
+    db_session.add_all([resume, job])
+    db_session.commit()
+    session_response = client.post("/sessions", json={"resume_id": resume.id, "job_posting_id": job.id})
+    session_id = session_response.json()["id"]
+
+    class FakeGeneratedDocument:
+        def __init__(self, id):
+            self.id = id
+
+    def fake_generate_document(db, session, storage, latex_renderer, latex_compiler):
+        return FakeGeneratedDocument(id=7)
+
+    monkeypatch.setattr(sessions_module, "generate_document", fake_generate_document)
+
+    response = client.post(f"/sessions/{session_id}/run-stage/document_generation")
+
+    assert response.status_code == 200
+    assert response.json() == {"stage_name": "document_generation", "status": "succeeded", "generated_document_id": 7}
+
+    status_response = client.get(f"/sessions/{session_id}/status")
+    runs = status_response.json()["pipeline_runs"]
+    assert len(runs) == 1
+    assert runs[0]["stage_name"] == "document_generation"
+    assert runs[0]["status"] == "succeeded"
+
+
+def test_run_stage_document_generation_reports_failure(client, db_session, monkeypatch):
+    import app.api.sessions as sessions_module
+    from app.services.document_generator import DocumentGenerationError
+
+    resume = Resume(original_filename="resume.pdf", storage_path="/tmp/resume.pdf")
+    job = JobPosting(source_url="https://example.com/job")
+    db_session.add_all([resume, job])
+    db_session.commit()
+    session_response = client.post("/sessions", json={"resume_id": resume.id, "job_posting_id": job.id})
+    session_id = session_response.json()["id"]
+
+    def failing_generate_document(db, session, storage, latex_renderer, latex_compiler):
+        raise DocumentGenerationError("tailoring_rewrite has not succeeded for this session yet")
+
+    monkeypatch.setattr(sessions_module, "generate_document", failing_generate_document)
+
+    response = client.post(f"/sessions/{session_id}/run-stage/document_generation")
+
+    assert response.status_code == 422
+
+    status_response = client.get(f"/sessions/{session_id}/status")
+    runs = status_response.json()["pipeline_runs"]
+    assert runs[0]["status"] == "failed"
+
+
+def test_run_stage_document_generation_times_out(client, db_session, monkeypatch):
+    import time
+    import app.api.sessions as sessions_module
+
+    resume = Resume(original_filename="resume.pdf", storage_path="/tmp/resume.pdf")
+    job = JobPosting(source_url="https://example.com/job")
+    db_session.add_all([resume, job])
+    db_session.commit()
+    session_response = client.post("/sessions", json={"resume_id": resume.id, "job_posting_id": job.id})
+    session_id = session_response.json()["id"]
+
+    class FakeGeneratedDocument:
+        def __init__(self, id):
+            self.id = id
+
+    def slow_generate_document(db, session, storage, latex_renderer, latex_compiler):
+        time.sleep(0.5)
+        return FakeGeneratedDocument(id=1)
+
+    monkeypatch.setattr(sessions_module, "generate_document", slow_generate_document)
+    monkeypatch.setattr(sessions_module, "STAGE_TIMEOUT_SECONDS", 0.05)
+
+    response = client.post(f"/sessions/{session_id}/run-stage/document_generation")
 
     assert response.status_code == 504
 
