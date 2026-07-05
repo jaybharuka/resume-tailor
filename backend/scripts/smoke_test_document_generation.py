@@ -1,13 +1,18 @@
 """Manual smoke test: run with `python scripts/smoke_test_document_generation.py`
-after installing Tectonic locally (see README's "Document generation" section
-for setup and the package-cache network tradeoff). Not run by pytest.
+from the `backend/` directory, after installing Tectonic locally (see README's
+"Document generation" section for setup and the package-cache network
+tradeoff). Not run by pytest.
 
 Builds a fixture tailored resume, generates a real PDF via the real Tectonic
 binary, and prints the resulting file's path and size so a human can open it
 and eyeball the rendering quality - this is the one place a human actually
 looks at the rendered output, not just asserts it compiled without error."""
 import json
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from app.core.config import get_settings
 from app.core.db import make_engine, make_session_factory
 from app.core.storage import LocalDiskStorage
