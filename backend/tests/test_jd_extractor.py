@@ -6,7 +6,7 @@ from app.core.llm.prompt_registry import PromptRegistry
 from app.models.job_posting import JobPostingDocument
 from app.services.jd_extractor import extract_job_posting, JDExtractionError
 from tests.fixtures.jd_fixtures import (
-    blurred_requirements_qualifications_jd_text, not_a_job_posting_text,
+    blurred_requirements_qualifications_jd_text, not_a_job_posting_text, complete_jd_text,
 )
 
 
@@ -121,3 +121,46 @@ def test_extract_job_posting_fails_fast_when_no_raw_text_without_calling_orchest
         extract_job_posting(db, job_posting, orchestrator, prompt_registry)
 
     assert orchestrator.calls == []
+
+
+def test_extract_job_posting_persists_responsibilities_and_keywords():
+    """Ledger cleanup (Phase 8 Task 1): complete_jd_text's Responsibilities:/
+    Keywords: labeled sections were never previously exercised through the real
+    extractor — every other test uses a fixture missing one or both sections.
+    This closes the gap by asserting both fields persist correctly when both
+    sections are genuinely present in the source text."""
+    db = _make_db()
+    job_posting = JobPosting(raw_text=complete_jd_text())
+    db.add(job_posting)
+    db.commit()
+
+    parsed_document = JobPostingDocument(
+        title="Senior Backend Engineer", company="Acme Corp", location="Remote (US)",
+        employment_type="Full-time",
+        requirements=[
+            "5+ years of experience with Python or Go",
+            "Experience with distributed systems and message queues",
+            "Strong understanding of relational databases",
+        ],
+        responsibilities=[
+            "Design and implement backend services for our core platform",
+            "Participate in on-call rotation",
+            "Collaborate with product and design teams",
+        ],
+        qualifications=[
+            "Bachelor's degree in Computer Science or equivalent experience",
+            "Experience mentoring junior engineers",
+        ],
+        keywords=["Python", "Go", "PostgreSQL", "Kafka", "distributed systems"],
+    )
+    orchestrator = FakeOrchestrator(result=OrchestratorResult(output=parsed_document, provider_used="nvidia", attempts=1))
+    prompt_registry = PromptRegistry(prompts_root="prompts")
+
+    result = extract_job_posting(db, job_posting, orchestrator, prompt_registry)
+
+    assert result.parsed_json["responsibilities"] == [
+        "Design and implement backend services for our core platform",
+        "Participate in on-call rotation",
+        "Collaborate with product and design teams",
+    ]
+    assert result.parsed_json["keywords"] == ["Python", "Go", "PostgreSQL", "Kafka", "distributed systems"]
