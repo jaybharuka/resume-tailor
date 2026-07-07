@@ -74,3 +74,26 @@ def collect_earned_skills(resume_json: dict, matching_skills: list[str]) -> tupl
         bullet_texts.extend(project.get("bullets", []))
     bullet_token_groups = [tokenize_for_skill_matching(bullet) for bullet in bullet_texts]
     return earned, bullet_token_groups
+
+
+def collect_identity_terms(resume_json: dict, job_posting_json: dict) -> set[str]:
+    """Tokens from identity/biographical fields - the target job's own title
+    and company, plus the candidate's own past employers and education
+    (institution, degree, field of study) - none of which are skill claims, so
+    none of them should ever trip a prose-scanning fabrication guard (a cover
+    letter or recruiter summary legitimately needs to name the role/company
+    it's about and the candidate's real biographical facts). Deliberately
+    excludes the job posting's requirements/keywords and the resume's
+    project/skill fields, which remain subject to the guard as before -
+    allowlisting those would defeat the guard's purpose, since missing_skills
+    are themselves often drawn straight from requirements."""
+    identity_text_parts = [
+        str(job_posting_json.get(field) or "") for field in ("title", "company")
+    ]
+    for entry in resume_json.get("work_experience", []):
+        identity_text_parts.append(str(entry.get("company") or ""))
+    for entry in resume_json.get("education", []):
+        identity_text_parts.append(str(entry.get("institution") or ""))
+        identity_text_parts.append(str(entry.get("degree") or ""))
+        identity_text_parts.append(str(entry.get("field_of_study") or ""))
+    return set(tokenize_for_skill_matching(" ".join(identity_text_parts)))
