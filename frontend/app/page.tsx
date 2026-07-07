@@ -2,9 +2,11 @@
 
 import { useState } from "react";
 import { UploadForm } from "@/components/upload-form";
+import { StageRunner } from "@/components/stage-runner";
 
 export default function Home() {
   const [sessionId, setSessionId] = useState<number | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   return (
     <main className="mx-auto max-w-3xl space-y-6 p-6">
@@ -12,7 +14,7 @@ export default function Home() {
       {sessionId === null ? (
         <UploadForm onSessionCreated={setSessionId} />
       ) : (
-        <p className="text-sm text-muted-foreground">Session {sessionId} created. (Stage runner arrives in Task 5.)</p>
+        <StageRunner sessionId={sessionId} onStageComplete={() => setRefreshKey((k) => k + 1)} />
       )}
     </main>
   );
