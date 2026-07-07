@@ -19,6 +19,9 @@ from app.services.tailoring_engine import tailor_resume
 from app.services.evaluator import evaluate_resume
 from app.services.latex_renderer import LatexRenderer
 from app.services.document_generator import generate_document, _compile_latex_to_pdf
+from app.services.cover_letter_generator import generate_cover_letter
+from app.services.recruiter_summary_generator import generate_recruiter_summary
+from app.services.interview_questions_generator import generate_interview_questions
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -95,6 +98,27 @@ def _run_document_generation(db: Session, session: TailoringSession, settings) -
     return {"generated_document_id": document.id}
 
 
+def _run_cover_letter(db: Session, session: TailoringSession, settings) -> dict:
+    orchestrator = build_orchestrator(db, session_id=session.id)
+    prompt_registry = PromptRegistry(prompts_root=settings.prompts_root)
+    document = generate_cover_letter(db, session, orchestrator, prompt_registry)
+    return {"generated_document_id": document.id}
+
+
+def _run_recruiter_summary(db: Session, session: TailoringSession, settings) -> dict:
+    orchestrator = build_orchestrator(db, session_id=session.id)
+    prompt_registry = PromptRegistry(prompts_root=settings.prompts_root)
+    document = generate_recruiter_summary(db, session, orchestrator, prompt_registry)
+    return {"generated_document_id": document.id}
+
+
+def _run_interview_questions(db: Session, session: TailoringSession, settings) -> dict:
+    orchestrator = build_orchestrator(db, session_id=session.id)
+    prompt_registry = PromptRegistry(prompts_root=settings.prompts_root)
+    document = generate_interview_questions(db, session, orchestrator, prompt_registry)
+    return {"generated_document_id": document.id}
+
+
 STAGE_RUNNERS = {
     "resume_parsing": _run_resume_parsing,
     "jd_extraction": _run_jd_extraction,
@@ -102,6 +126,9 @@ STAGE_RUNNERS = {
     "tailoring_rewrite": _run_tailoring,
     "evaluation": _run_evaluation,
     "document_generation": _run_document_generation,
+    "cover_letter": _run_cover_letter,
+    "recruiter_summary": _run_recruiter_summary,
+    "interview_questions": _run_interview_questions,
 }
 
 
