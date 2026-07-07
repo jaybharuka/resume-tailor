@@ -146,15 +146,19 @@ def generate_recruiter_summary(
     earned_skills, bullet_token_groups = collect_earned_skills(
         tailored_version.resume_json, gap_analysis.analysis_json.get("matching_skills", [])
     )
-    # A recruiter summary legitimately needs to name the role being considered
-    # (e.g. "for the Senior Backend Engineer position") - referencing the target
-    # job's own title is not a claim about the candidate's skills, so title
-    # tokens are earned too. Deliberately scoped to `title` only, not the job
-    # posting's requirements/keywords - allowlisting those would defeat the
-    # guard's purpose, since missing_skills are themselves often drawn straight
-    # from requirements.
-    job_title = (job_posting.parsed_json or {}).get("title") or ""
-    earned_skills = earned_skills | set(tokenize_for_skill_matching(job_title))
+    # A recruiter summary legitimately needs to name the role and company being
+    # considered (e.g. "for the Senior Backend Engineer position at Acme Corp")
+    # - referencing the target job's own identity (title, company) is not a
+    # claim about the candidate's skills, so their tokens are earned too.
+    # Deliberately scoped to `title`/`company` only, not the job posting's
+    # requirements/keywords - allowlisting those would defeat the guard's
+    # purpose, since missing_skills are themselves often drawn straight from
+    # requirements.
+    job_identity_fields = (job_posting.parsed_json or {})
+    job_identity_text = " ".join(
+        str(job_identity_fields.get(field) or "") for field in ("title", "company")
+    )
+    earned_skills = earned_skills | set(tokenize_for_skill_matching(job_identity_text))
     unearned_skill = _find_unearned_skill_in_prose(body, earned_skills, bullet_token_groups)
     if unearned_skill is not None:
         raise RecruiterSummaryError(
