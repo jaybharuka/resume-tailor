@@ -1,7 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from datetime import datetime, timezone
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.api.deps import get_db
@@ -214,6 +214,7 @@ def list_documents(session_id: int, db: Session = Depends(get_db)):
     documents = db.query(GeneratedDocument).filter_by(session_id=session_id).all()
     return [
         {
+            "id": doc.id,
             "document_type": doc.document_type,
             "storage_path": doc.storage_path,
             "content": doc.content,
@@ -221,6 +222,37 @@ def list_documents(session_id: int, db: Session = Depends(get_db)):
         }
         for doc in documents
     ]
+
+
+@router.get("/{session_id}/documents/{document_id}/download")
+def download_document(session_id: int, document_id: int, db: Session = Depends(get_db)):
+    session = db.get(TailoringSession, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"session {session_id} not found")
+
+    document = db.get(GeneratedDocument, document_id)
+    if document is None or document.session_id != session_id:
+        raise HTTPException(
+            status_code=404, detail=f"document {document_id} not found for session {session_id}"
+        )
+    if document.storage_path is None:
+        raise HTTPException(status_code=404, detail=f"document {document_id} has no downloadable file")
+
+    settings = get_settings()
+    storage = LocalDiskStorage(root=settings.storage_root)
+    try:
+        file_bytes = storage.load(document.storage_path)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404, detail=f"file for document {document_id} is missing from storage"
+        )
+
+    filename = f"{document.document_type}_v{document.version_number}.pdf"
+    return Response(
+        content=file_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/{session_id}/reports/ats")

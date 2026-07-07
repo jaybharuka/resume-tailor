@@ -474,7 +474,7 @@ Start the backend (from `infra/`, if not already running): `docker compose up -d
 
 Then, from `frontend/`: `npm run dev`
 
-Open `http://localhost:3000` in a browser (or `curl http://localhost:3000`) and confirm the page renders "Backend /api/health response:" followed by real JSON like `{"database":"ok","hiring_agent_service":"ok"}` — not an error, not "loading..." stuck forever. This proves the rewrites proxy genuinely reaches the Dockerized backend, not just that the frontend boots.
+Open `http://localhost:3100` in a browser (or `curl http://localhost:3100`) and confirm the page renders "Backend /api/health response:" followed by real JSON like `{"database":"ok","hiring_agent_service":"ok"}` — not an error, not "loading..." stuck forever. This proves the rewrites proxy genuinely reaches the Dockerized backend, not just that the frontend boots.
 
 Stop the dev server (Ctrl+C) once confirmed.
 
@@ -796,7 +796,7 @@ Expected: no errors.
 
 - [ ] **Step 4: Manually verify against the real backend**
 
-With the backend running (`docker compose up -d` from `infra/`) and `npm run dev` running from `frontend/`, open `http://localhost:3000`, select a real PDF file, paste any job description text, and click "Start". Confirm the page updates to show "Session N created." with a real numeric session id — not an error. If it errors, check the browser's network tab for which request failed and confirm the backend is actually reachable at `http://localhost:8020/health`.
+With the backend running (`docker compose up -d` from `infra/`) and `npm run dev` running from `frontend/`, open `http://localhost:3100`, select a real PDF file, paste any job description text, and click "Start". Confirm the page updates to show "Session N created." with a real numeric session id — not an error. If it errors, check the browser's network tab for which request failed and confirm the backend is actually reachable at `http://localhost:8020/health`.
 
 - [ ] **Step 5: Commit**
 
@@ -1181,7 +1181,7 @@ export default defineConfig({
   testDir: "./e2e",
   timeout: 20 * 60 * 1000,
   use: {
-    baseURL: "http://localhost:3000",
+    baseURL: "http://localhost:3100",
   },
 });
 ```

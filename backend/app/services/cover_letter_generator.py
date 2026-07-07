@@ -7,7 +7,8 @@ from app.models.db_models import TailoringSession, JobPosting, ResumeVersion, Ga
 from app.models.cover_letter import CoverLetterDocument
 from app.services.errors import StageExecutionError
 from app.services.skill_matching import (
-    collect_earned_skills, skill_mentioned_in_token_groups, tokenize_for_skill_matching,
+    collect_earned_skills, collect_identity_terms, skill_mentioned_in_token_groups,
+    tokenize_for_skill_matching,
 )
 
 COVER_LETTER_MODEL = "z-ai/glm-5.2"
@@ -142,6 +143,20 @@ def generate_cover_letter(
 
     earned_skills, bullet_token_groups = collect_earned_skills(
         tailored_version.resume_json, gap_analysis.analysis_json.get("matching_skills", [])
+    )
+    # A cover letter legitimately needs to name entities that are never skill
+    # claims: the target role/company it's applying to (e.g. "the Senior
+    # Backend Engineer position" / "excited to join Acme Corp") and the
+    # candidate's OWN biographical facts drawn straight from their real resume
+    # - past employers ("previously at Globex Inc"), degrees/institutions
+    # ("a B.S. in Computer Science from State University"). None of these are
+    # claims about the candidate's skills - they're identity/biographical
+    # references, not technology mentions - so all are earned. Deliberately
+    # scoped to these identity fields only, not the job posting's
+    # requirements/keywords, which would defeat the guard's purpose since
+    # missing_skills are themselves often drawn straight from requirements.
+    earned_skills = earned_skills | collect_identity_terms(
+        tailored_version.resume_json, job_posting.parsed_json or {}
     )
     unearned_skill = _find_unearned_skill_in_prose(body, earned_skills, bullet_token_groups)
     if unearned_skill is not None:

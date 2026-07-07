@@ -22,6 +22,11 @@ def _resolve_hiring_agent_repo_path() -> str:
 
 HIRING_AGENT_REPO_PATH = _resolve_hiring_agent_repo_path()
 sys.path.insert(0, HIRING_AGENT_REPO_PATH)
+# TemplateManager (hiring-agent-imp/prompts/template_manager.py) defaults to a
+# repo-root-relative path ("prompts/templates") for its Jinja templates, so the
+# evaluator can only find them if the process's cwd is the hiring-agent-imp repo
+# root itself - never true in Docker, where WORKDIR is this service's own /service.
+os.chdir(HIRING_AGENT_REPO_PATH)
 
 from fastapi import FastAPI
 from pydantic import BaseModel
