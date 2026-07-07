@@ -26,7 +26,7 @@ def test_run_stage_returns_501_for_unimplemented_stage(client, db_session):
     session_response = client.post("/sessions", json={"resume_id": resume.id, "job_posting_id": job.id})
     session_id = session_response.json()["id"]
 
-    response = client.post(f"/sessions/{session_id}/run-stage/cover_letter_generation")
+    response = client.post(f"/sessions/{session_id}/run-stage/final_export")
 
     assert response.status_code == 501
 
@@ -623,3 +623,342 @@ def test_run_stage_document_generation_times_out(client, db_session, monkeypatch
     status_response = client.get(f"/sessions/{session_id}/status")
     runs = status_response.json()["pipeline_runs"]
     assert runs[0]["status"] == "failed"
+
+
+def test_run_stage_cover_letter_succeeds(client, db_session, monkeypatch):
+    import app.api.sessions as sessions_module
+
+    resume = Resume(original_filename="resume.pdf", storage_path="/tmp/resume.pdf")
+    job = JobPosting(source_url="https://example.com/job")
+    db_session.add_all([resume, job])
+    db_session.commit()
+    session_response = client.post("/sessions", json={"resume_id": resume.id, "job_posting_id": job.id})
+    session_id = session_response.json()["id"]
+
+    class FakeGeneratedDocument:
+        def __init__(self, id):
+            self.id = id
+
+    def fake_generate_cover_letter(db, session, orchestrator, prompt_registry):
+        return FakeGeneratedDocument(id=11)
+
+    monkeypatch.setattr(sessions_module, "generate_cover_letter", fake_generate_cover_letter)
+
+    response = client.post(f"/sessions/{session_id}/run-stage/cover_letter")
+
+    assert response.status_code == 200
+    assert response.json() == {"stage_name": "cover_letter", "status": "succeeded", "generated_document_id": 11}
+
+    status_response = client.get(f"/sessions/{session_id}/status")
+    runs = status_response.json()["pipeline_runs"]
+    assert runs[0]["stage_name"] == "cover_letter"
+    assert runs[0]["status"] == "succeeded"
+
+
+def test_run_stage_cover_letter_reports_failure(client, db_session, monkeypatch):
+    import app.api.sessions as sessions_module
+    from app.services.cover_letter_generator import CoverLetterError
+
+    resume = Resume(original_filename="resume.pdf", storage_path="/tmp/resume.pdf")
+    job = JobPosting(source_url="https://example.com/job")
+    db_session.add_all([resume, job])
+    db_session.commit()
+    session_response = client.post("/sessions", json={"resume_id": resume.id, "job_posting_id": job.id})
+    session_id = session_response.json()["id"]
+
+    def failing_generate_cover_letter(db, session, orchestrator, prompt_registry):
+        raise CoverLetterError("tailoring_rewrite has not succeeded for this session yet")
+
+    monkeypatch.setattr(sessions_module, "generate_cover_letter", failing_generate_cover_letter)
+
+    response = client.post(f"/sessions/{session_id}/run-stage/cover_letter")
+
+    assert response.status_code == 422
+    status_response = client.get(f"/sessions/{session_id}/status")
+    assert status_response.json()["pipeline_runs"][0]["status"] == "failed"
+
+
+def test_run_stage_cover_letter_times_out(client, db_session, monkeypatch):
+    import time
+    import app.api.sessions as sessions_module
+
+    resume = Resume(original_filename="resume.pdf", storage_path="/tmp/resume.pdf")
+    job = JobPosting(source_url="https://example.com/job")
+    db_session.add_all([resume, job])
+    db_session.commit()
+    session_response = client.post("/sessions", json={"resume_id": resume.id, "job_posting_id": job.id})
+    session_id = session_response.json()["id"]
+
+    class FakeGeneratedDocument:
+        def __init__(self, id):
+            self.id = id
+
+    def slow_generate_cover_letter(db, session, orchestrator, prompt_registry):
+        time.sleep(0.5)
+        return FakeGeneratedDocument(id=1)
+
+    monkeypatch.setattr(sessions_module, "generate_cover_letter", slow_generate_cover_letter)
+    monkeypatch.setattr(sessions_module, "STAGE_TIMEOUT_SECONDS", 0.05)
+
+    response = client.post(f"/sessions/{session_id}/run-stage/cover_letter")
+
+    assert response.status_code == 504
+    db_session.expire_all()
+    status_response = client.get(f"/sessions/{session_id}/status")
+    assert status_response.json()["pipeline_runs"][0]["status"] == "failed"
+
+
+def test_run_stage_recruiter_summary_succeeds(client, db_session, monkeypatch):
+    import app.api.sessions as sessions_module
+
+    resume = Resume(original_filename="resume.pdf", storage_path="/tmp/resume.pdf")
+    job = JobPosting(source_url="https://example.com/job")
+    db_session.add_all([resume, job])
+    db_session.commit()
+    session_response = client.post("/sessions", json={"resume_id": resume.id, "job_posting_id": job.id})
+    session_id = session_response.json()["id"]
+
+    class FakeGeneratedDocument:
+        def __init__(self, id):
+            self.id = id
+
+    def fake_generate_recruiter_summary(db, session, orchestrator, prompt_registry):
+        return FakeGeneratedDocument(id=12)
+
+    monkeypatch.setattr(sessions_module, "generate_recruiter_summary", fake_generate_recruiter_summary)
+
+    response = client.post(f"/sessions/{session_id}/run-stage/recruiter_summary")
+
+    assert response.status_code == 200
+    assert response.json() == {"stage_name": "recruiter_summary", "status": "succeeded", "generated_document_id": 12}
+
+
+def test_run_stage_recruiter_summary_reports_failure(client, db_session, monkeypatch):
+    import app.api.sessions as sessions_module
+    from app.services.recruiter_summary_generator import RecruiterSummaryError
+
+    resume = Resume(original_filename="resume.pdf", storage_path="/tmp/resume.pdf")
+    job = JobPosting(source_url="https://example.com/job")
+    db_session.add_all([resume, job])
+    db_session.commit()
+    session_response = client.post("/sessions", json={"resume_id": resume.id, "job_posting_id": job.id})
+    session_id = session_response.json()["id"]
+
+    def failing_generate_recruiter_summary(db, session, orchestrator, prompt_registry):
+        raise RecruiterSummaryError("gap_analysis has not succeeded for this session yet")
+
+    monkeypatch.setattr(sessions_module, "generate_recruiter_summary", failing_generate_recruiter_summary)
+
+    response = client.post(f"/sessions/{session_id}/run-stage/recruiter_summary")
+
+    assert response.status_code == 422
+
+
+def test_run_stage_recruiter_summary_times_out(client, db_session, monkeypatch):
+    import time
+    import app.api.sessions as sessions_module
+
+    resume = Resume(original_filename="resume.pdf", storage_path="/tmp/resume.pdf")
+    job = JobPosting(source_url="https://example.com/job")
+    db_session.add_all([resume, job])
+    db_session.commit()
+    session_response = client.post("/sessions", json={"resume_id": resume.id, "job_posting_id": job.id})
+    session_id = session_response.json()["id"]
+
+    class FakeGeneratedDocument:
+        def __init__(self, id):
+            self.id = id
+
+    def slow_generate_recruiter_summary(db, session, orchestrator, prompt_registry):
+        time.sleep(0.5)
+        return FakeGeneratedDocument(id=1)
+
+    monkeypatch.setattr(sessions_module, "generate_recruiter_summary", slow_generate_recruiter_summary)
+    monkeypatch.setattr(sessions_module, "STAGE_TIMEOUT_SECONDS", 0.05)
+
+    response = client.post(f"/sessions/{session_id}/run-stage/recruiter_summary")
+
+    assert response.status_code == 504
+    db_session.expire_all()
+    status_response = client.get(f"/sessions/{session_id}/status")
+    assert status_response.json()["pipeline_runs"][0]["status"] == "failed"
+
+
+def test_run_stage_interview_questions_succeeds(client, db_session, monkeypatch):
+    import app.api.sessions as sessions_module
+
+    resume = Resume(original_filename="resume.pdf", storage_path="/tmp/resume.pdf")
+    job = JobPosting(source_url="https://example.com/job")
+    db_session.add_all([resume, job])
+    db_session.commit()
+    session_response = client.post("/sessions", json={"resume_id": resume.id, "job_posting_id": job.id})
+    session_id = session_response.json()["id"]
+
+    class FakeGeneratedDocument:
+        def __init__(self, id):
+            self.id = id
+
+    def fake_generate_interview_questions(db, session, orchestrator, prompt_registry):
+        return FakeGeneratedDocument(id=13)
+
+    monkeypatch.setattr(sessions_module, "generate_interview_questions", fake_generate_interview_questions)
+
+    response = client.post(f"/sessions/{session_id}/run-stage/interview_questions")
+
+    assert response.status_code == 200
+    assert response.json() == {"stage_name": "interview_questions", "status": "succeeded", "generated_document_id": 13}
+
+
+def test_run_stage_interview_questions_reports_failure(client, db_session, monkeypatch):
+    import app.api.sessions as sessions_module
+    from app.services.interview_questions_generator import InterviewQuestionsError
+
+    resume = Resume(original_filename="resume.pdf", storage_path="/tmp/resume.pdf")
+    job = JobPosting(source_url="https://example.com/job")
+    db_session.add_all([resume, job])
+    db_session.commit()
+    session_response = client.post("/sessions", json={"resume_id": resume.id, "job_posting_id": job.id})
+    session_id = session_response.json()["id"]
+
+    def failing_generate_interview_questions(db, session, orchestrator, prompt_registry):
+        raise InterviewQuestionsError("jd_extraction has not succeeded for this session yet")
+
+    monkeypatch.setattr(sessions_module, "generate_interview_questions", failing_generate_interview_questions)
+
+    response = client.post(f"/sessions/{session_id}/run-stage/interview_questions")
+
+    assert response.status_code == 422
+
+
+def test_run_stage_interview_questions_times_out(client, db_session, monkeypatch):
+    import time
+    import app.api.sessions as sessions_module
+
+    resume = Resume(original_filename="resume.pdf", storage_path="/tmp/resume.pdf")
+    job = JobPosting(source_url="https://example.com/job")
+    db_session.add_all([resume, job])
+    db_session.commit()
+    session_response = client.post("/sessions", json={"resume_id": resume.id, "job_posting_id": job.id})
+    session_id = session_response.json()["id"]
+
+    class FakeGeneratedDocument:
+        def __init__(self, id):
+            self.id = id
+
+    def slow_generate_interview_questions(db, session, orchestrator, prompt_registry):
+        time.sleep(0.5)
+        return FakeGeneratedDocument(id=1)
+
+    monkeypatch.setattr(sessions_module, "generate_interview_questions", slow_generate_interview_questions)
+    monkeypatch.setattr(sessions_module, "STAGE_TIMEOUT_SECONDS", 0.05)
+
+    response = client.post(f"/sessions/{session_id}/run-stage/interview_questions")
+
+    assert response.status_code == 504
+    db_session.expire_all()
+    status_response = client.get(f"/sessions/{session_id}/status")
+    assert status_response.json()["pipeline_runs"][0]["status"] == "failed"
+
+
+def test_get_ats_report_returns_404_when_evaluation_not_run(client, db_session):
+    resume = Resume(original_filename="resume.pdf", storage_path="/tmp/resume.pdf")
+    job = JobPosting(source_url="https://example.com/job")
+    db_session.add_all([resume, job])
+    db_session.commit()
+    session_response = client.post("/sessions", json={"resume_id": resume.id, "job_posting_id": job.id})
+    session_id = session_response.json()["id"]
+
+    response = client.get(f"/sessions/{session_id}/reports/ats")
+
+    assert response.status_code == 404
+
+
+def test_get_ats_report_reformats_latest_evaluation_run(client, db_session):
+    from app.models.db_models import EvaluationRun, ResumeVersion
+
+    resume = Resume(original_filename="resume.pdf", storage_path="/tmp/resume.pdf")
+    job = JobPosting(source_url="https://example.com/job")
+    db_session.add_all([resume, job])
+    db_session.commit()
+    session_response = client.post("/sessions", json={"resume_id": resume.id, "job_posting_id": job.id})
+    session_id = session_response.json()["id"]
+
+    resume_version = ResumeVersion(
+        resume_id=resume.id, session_id=session_id, version_number=1,
+        resume_json={"name": "Jane"}, produced_by_stage="resume_parsing",
+    )
+    db_session.add(resume_version)
+    db_session.commit()
+
+    evaluation = EvaluationRun(
+        session_id=session_id, resume_version_id=resume_version.id,
+        overall_score=88.0, open_source_score=30, projects_score=25,
+        production_score=20, technical_skills_score=8,
+        raw_response_json={
+            "evidence": {"open_source": "3 popular repos"},
+            "bonus_points": {"total": 5, "breakdown": "Active OSS contributor"},
+            "deductions": {"total": 0, "reasons": "No deductions"},
+        },
+        rubric_version="hiring-agent-v1", hiring_agent_service_version="0.1.0",
+    )
+    db_session.add(evaluation)
+    db_session.commit()
+
+    response = client.get(f"/sessions/{session_id}/reports/ats")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["overall_score"] == 88.0
+    assert body["evidence"] == {"open_source": "3 popular repos"}
+    assert body["bonus_points"] == {"total": 5, "breakdown": "Active OSS contributor"}
+
+
+def test_get_skill_gap_report_returns_404_when_gap_analysis_not_run(client, db_session):
+    resume = Resume(original_filename="resume.pdf", storage_path="/tmp/resume.pdf")
+    job = JobPosting(source_url="https://example.com/job")
+    db_session.add_all([resume, job])
+    db_session.commit()
+    session_response = client.post("/sessions", json={"resume_id": resume.id, "job_posting_id": job.id})
+    session_id = session_response.json()["id"]
+
+    response = client.get(f"/sessions/{session_id}/reports/skill-gap")
+
+    assert response.status_code == 404
+
+
+def test_get_skill_gap_report_reformats_latest_gap_analysis(client, db_session):
+    from app.models.db_models import GapAnalysis, ResumeVersion
+
+    resume = Resume(original_filename="resume.pdf", storage_path="/tmp/resume.pdf")
+    job = JobPosting(source_url="https://example.com/job")
+    db_session.add_all([resume, job])
+    db_session.commit()
+    session_response = client.post("/sessions", json={"resume_id": resume.id, "job_posting_id": job.id})
+    session_id = session_response.json()["id"]
+
+    resume_version = ResumeVersion(
+        resume_id=resume.id, session_id=session_id, version_number=1,
+        resume_json={"name": "Jane"}, produced_by_stage="resume_parsing",
+    )
+    db_session.add(resume_version)
+    db_session.commit()
+
+    gap_analysis = GapAnalysis(
+        session_id=session_id, resume_version_id=resume_version.id, job_posting_id=job.id,
+        analysis_json={
+            "matching_skills": ["Python"], "missing_skills": ["Docker"],
+            "experience_gap_notes": "JD wants 5+ years; resume shows 3.",
+            "relevant_projects": ["Inventory Tracker"], "irrelevant_projects": [],
+            "recommended_keywords": ["distributed systems"],
+        },
+    )
+    db_session.add(gap_analysis)
+    db_session.commit()
+
+    response = client.get(f"/sessions/{session_id}/reports/skill-gap")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["matching_skills"] == ["Python"]
+    assert body["missing_skills"] == ["Docker"]
+    assert body["experience_gap_notes"] == "JD wants 5+ years; resume shows 3."

@@ -76,3 +76,23 @@ def test_tailoring_prompt_embeds_all_three_input_documents():
     assert '{"skills": ["Python"]}' in rendered
     assert '{"title": "Backend Engineer"}' in rendered
     assert '{"missing_skills": ["Docker"]}' in rendered
+
+
+def test_tailoring_prompt_forecloses_metrics_sourced_from_jd_or_gap_analysis():
+    """Ledger cleanup (Phase 8 Task 1): the metrics rule previously only said
+    'not already stated in the original resume', without explicitly ruling out
+    lifting a number from the JD/gap-analysis JSON instead."""
+    rendered = _render()
+    lowered = rendered.lower()
+    assert "job posting or gap analysis" in lowered
+    assert "not a valid source" in lowered
+
+
+def test_tailoring_prompt_states_missing_skill_precedence_over_unearned_skill_rule():
+    """Ledger cleanup (Phase 8 Task 1): no explicit override-ordering was
+    previously stated between the No Unearned Skills and Never Claim a Missing
+    Skill rules for the both-traceable-and-missing edge case."""
+    rendered = _render()
+    lowered = rendered.lower()
+    assert "takes precedence" in lowered
+    assert "upstream data" in lowered or "inconsistency" in lowered

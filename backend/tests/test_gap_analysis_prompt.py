@@ -48,3 +48,16 @@ def test_gap_analysis_prompt_embeds_both_documents():
     )
     assert '{"skills": ["Python"]}' in rendered
     assert '{"title": "Backend Engineer"}' in rendered
+
+
+def test_gap_analysis_prompt_clarifies_where_a_matching_skill_may_appear():
+    """Ledger cleanup (Phase 8 Task 1): clause (a) of the strict-match rule
+    previously read as a standalone sufficient condition with no qualifier on
+    WHERE in the resume a skill must appear - this asserts the qualifier is
+    genuinely present in the rendered prompt."""
+    registry = PromptRegistry(prompts_root="prompts")
+    rendered = registry.render("gap_analysis", "v1", resume_json="{}", job_posting_json="{}")
+    lowered = rendered.lower()
+    assert "skills list" in lowered
+    assert "bullet" in lowered
+    assert "technologies" in lowered

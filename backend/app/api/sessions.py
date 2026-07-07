@@ -10,7 +10,7 @@ from app.core.db import make_engine, make_session_factory
 from app.core.llm.orchestrator_factory import build_orchestrator
 from app.core.llm.prompt_registry import PromptRegistry
 from app.core.storage import LocalDiskStorage
-from app.models.db_models import Resume, JobPosting, TailoringSession, PipelineRun, GeneratedDocument
+from app.models.db_models import Resume, JobPosting, TailoringSession, PipelineRun, GeneratedDocument, EvaluationRun, GapAnalysis
 from app.services.errors import StageExecutionError
 from app.services.resume_parser import parse_resume
 from app.services.jd_extractor import extract_job_posting
@@ -19,6 +19,9 @@ from app.services.tailoring_engine import tailor_resume
 from app.services.evaluator import evaluate_resume
 from app.services.latex_renderer import LatexRenderer
 from app.services.document_generator import generate_document, _compile_latex_to_pdf
+from app.services.cover_letter_generator import generate_cover_letter
+from app.services.recruiter_summary_generator import generate_recruiter_summary
+from app.services.interview_questions_generator import generate_interview_questions
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -95,6 +98,27 @@ def _run_document_generation(db: Session, session: TailoringSession, settings) -
     return {"generated_document_id": document.id}
 
 
+def _run_cover_letter(db: Session, session: TailoringSession, settings) -> dict:
+    orchestrator = build_orchestrator(db, session_id=session.id)
+    prompt_registry = PromptRegistry(prompts_root=settings.prompts_root)
+    document = generate_cover_letter(db, session, orchestrator, prompt_registry)
+    return {"generated_document_id": document.id}
+
+
+def _run_recruiter_summary(db: Session, session: TailoringSession, settings) -> dict:
+    orchestrator = build_orchestrator(db, session_id=session.id)
+    prompt_registry = PromptRegistry(prompts_root=settings.prompts_root)
+    document = generate_recruiter_summary(db, session, orchestrator, prompt_registry)
+    return {"generated_document_id": document.id}
+
+
+def _run_interview_questions(db: Session, session: TailoringSession, settings) -> dict:
+    orchestrator = build_orchestrator(db, session_id=session.id)
+    prompt_registry = PromptRegistry(prompts_root=settings.prompts_root)
+    document = generate_interview_questions(db, session, orchestrator, prompt_registry)
+    return {"generated_document_id": document.id}
+
+
 STAGE_RUNNERS = {
     "resume_parsing": _run_resume_parsing,
     "jd_extraction": _run_jd_extraction,
@@ -102,6 +126,9 @@ STAGE_RUNNERS = {
     "tailoring_rewrite": _run_tailoring,
     "evaluation": _run_evaluation,
     "document_generation": _run_document_generation,
+    "cover_letter": _run_cover_letter,
+    "recruiter_summary": _run_recruiter_summary,
+    "interview_questions": _run_interview_questions,
 }
 
 
@@ -186,6 +213,71 @@ def list_documents(session_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=f"session {session_id} not found")
     documents = db.query(GeneratedDocument).filter_by(session_id=session_id).all()
     return [
-        {"document_type": doc.document_type, "storage_path": doc.storage_path, "version_number": doc.version_number}
+        {
+            "document_type": doc.document_type,
+            "storage_path": doc.storage_path,
+            "content": doc.content,
+            "version_number": doc.version_number,
+        }
         for doc in documents
     ]
+
+
+@router.get("/{session_id}/reports/ats")
+def get_ats_report(session_id: int, db: Session = Depends(get_db)):
+    session = db.get(TailoringSession, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"session {session_id} not found")
+
+    evaluation = (
+        db.query(EvaluationRun)
+        .filter_by(session_id=session_id)
+        .order_by(EvaluationRun.id.desc())
+        .first()
+    )
+    if evaluation is None:
+        raise HTTPException(status_code=404, detail="evaluation has not succeeded for this session yet")
+
+    raw = evaluation.raw_response_json or {}
+    return {
+        "session_id": session_id,
+        "evaluation_run_id": evaluation.id,
+        "overall_score": evaluation.overall_score,
+        "open_source_score": evaluation.open_source_score,
+        "projects_score": evaluation.projects_score,
+        "production_score": evaluation.production_score,
+        "technical_skills_score": evaluation.technical_skills_score,
+        "rubric_version": evaluation.rubric_version,
+        "hiring_agent_service_version": evaluation.hiring_agent_service_version,
+        "evidence": raw.get("evidence"),
+        "bonus_points": raw.get("bonus_points"),
+        "deductions": raw.get("deductions"),
+    }
+
+
+@router.get("/{session_id}/reports/skill-gap")
+def get_skill_gap_report(session_id: int, db: Session = Depends(get_db)):
+    session = db.get(TailoringSession, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"session {session_id} not found")
+
+    gap_analysis = (
+        db.query(GapAnalysis)
+        .filter_by(session_id=session_id)
+        .order_by(GapAnalysis.id.desc())
+        .first()
+    )
+    if gap_analysis is None:
+        raise HTTPException(status_code=404, detail="gap_analysis has not succeeded for this session yet")
+
+    analysis = gap_analysis.analysis_json or {}
+    return {
+        "session_id": session_id,
+        "gap_analysis_id": gap_analysis.id,
+        "matching_skills": analysis.get("matching_skills", []),
+        "missing_skills": analysis.get("missing_skills", []),
+        "experience_gap_notes": analysis.get("experience_gap_notes"),
+        "relevant_projects": analysis.get("relevant_projects", []),
+        "irrelevant_projects": analysis.get("irrelevant_projects", []),
+        "recommended_keywords": analysis.get("recommended_keywords", []),
+    }

@@ -1,0 +1,26 @@
+You are generating interview questions for a hiring team, based on a job
+posting and a gap analysis comparing a specific candidate's resume against
+that posting. Generate at least 5 questions: a mix of role-relevant
+questions grounded in the job posting's actual requirements and
+responsibilities, and a few questions specifically probing the gap areas
+named in the gap analysis's missing_skills or experience_gap_notes.
+
+Do not generate generic filler questions unrelated to this specific role
+(e.g. "Tell me about yourself") - every question should be traceable to
+either the job posting's content or the gap analysis's findings below.
+
+Output ONLY a single JSON object matching exactly this shape (no markdown
+code fences, no explanation, no extra text before or after the JSON):
+
+{
+  "schema_version": 1,
+  "questions": ["array of at least 5 question strings"]
+}
+
+Job posting (structured JSON):
+
+{{ job_posting_json }}
+
+Gap analysis (structured JSON):
+
+{{ gap_analysis_json }}
