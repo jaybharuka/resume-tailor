@@ -143,6 +143,14 @@ def generate_cover_letter(
     earned_skills, bullet_token_groups = collect_earned_skills(
         tailored_version.resume_json, gap_analysis.analysis_json.get("matching_skills", [])
     )
+    # A cover letter legitimately needs to name the role it's applying for (e.g.
+    # "the Senior Backend Engineer position") - referencing the target job's own
+    # title is not a claim about the candidate's skills, so title tokens are
+    # earned too. Deliberately scoped to `title` only, not the job posting's
+    # requirements/keywords - allowlisting those would defeat the guard's purpose,
+    # since missing_skills are themselves often drawn straight from requirements.
+    job_title = (job_posting.parsed_json or {}).get("title") or ""
+    earned_skills = earned_skills | set(tokenize_for_skill_matching(job_title))
     unearned_skill = _find_unearned_skill_in_prose(body, earned_skills, bullet_token_groups)
     if unearned_skill is not None:
         raise CoverLetterError(
