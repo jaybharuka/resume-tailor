@@ -210,6 +210,36 @@ def test_generate_recruiter_summary_accepts_company_name_reference_in_prose():
     assert "Acme Corp" in document.content
 
 
+def test_generate_recruiter_summary_accepts_candidates_own_past_employer_in_prose():
+    """Regression test: referencing the candidate's OWN past employer from
+    their real resume (e.g. "previously at Globex Inc") is not a claim about
+    the candidate's skills and must not be rejected as an unearned skill -
+    discovered via a real live E2E run where a real LLM referenced a second
+    past employer name from the parsed resume and was incorrectly flagged
+    before this fix (which only allowlisted the target job's own identity,
+    not the candidate's own resume history)."""
+    db = _make_db()
+    resume_doc, job_posting_doc, gap_analysis_doc = base_tailoring_triple()
+    resume_json = resume_doc.model_dump()
+    resume_json["work_experience"].append({
+        "company": "Globex Inc", "title": "Backend Engineer",
+        "start_date": "2018", "end_date": "2021", "bullets": ["Built internal tooling"],
+    })
+    session, tailored_version, job_posting, gap_analysis = _make_session_with_all_prerequisites(
+        db, resume_json, job_posting_doc.model_dump(), gap_analysis_doc.model_dump(),
+    )
+
+    result_document = RecruiterSummaryDocument(
+        body="The candidate previously worked at Globex Inc before their current role."
+    )
+    orchestrator = FakeOrchestrator(result=OrchestratorResult(output=result_document, provider_used="nvidia", attempts=1))
+    prompt_registry = PromptRegistry(prompts_root="prompts")
+
+    document = generate_recruiter_summary(db, session, orchestrator, prompt_registry)
+
+    assert "Globex Inc" in document.content
+
+
 def test_generate_recruiter_summary_version_numbering_increments_within_session():
     db = _make_db()
     resume_doc, job_posting_doc, gap_analysis_doc = base_tailoring_triple()

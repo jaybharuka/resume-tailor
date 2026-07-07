@@ -146,19 +146,25 @@ def generate_recruiter_summary(
     earned_skills, bullet_token_groups = collect_earned_skills(
         tailored_version.resume_json, gap_analysis.analysis_json.get("matching_skills", [])
     )
-    # A recruiter summary legitimately needs to name the role and company being
-    # considered (e.g. "for the Senior Backend Engineer position at Acme Corp")
-    # - referencing the target job's own identity (title, company) is not a
-    # claim about the candidate's skills, so their tokens are earned too.
-    # Deliberately scoped to `title`/`company` only, not the job posting's
-    # requirements/keywords - allowlisting those would defeat the guard's
-    # purpose, since missing_skills are themselves often drawn straight from
+    # A recruiter summary legitimately needs to name entities that are never
+    # skill claims: the target role/company being considered (e.g. "for the
+    # Senior Backend Engineer position at Acme Corp") and the candidate's OWN
+    # past employers, drawn straight from their real resume (e.g. "previously
+    # at Globex Inc"). Neither is a claim about the candidate's skills -
+    # they're identity references, not technology mentions - so both are
+    # earned. Deliberately scoped to these identity fields only, not the job
+    # posting's requirements/keywords, which would defeat the guard's purpose
+    # since missing_skills are themselves often drawn straight from
     # requirements.
     job_identity_fields = (job_posting.parsed_json or {})
-    job_identity_text = " ".join(
+    identity_text_parts = [
         str(job_identity_fields.get(field) or "") for field in ("title", "company")
+    ]
+    identity_text_parts.extend(
+        str(entry.get("company") or "")
+        for entry in tailored_version.resume_json.get("work_experience", [])
     )
-    earned_skills = earned_skills | set(tokenize_for_skill_matching(job_identity_text))
+    earned_skills = earned_skills | set(tokenize_for_skill_matching(" ".join(identity_text_parts)))
     unearned_skill = _find_unearned_skill_in_prose(body, earned_skills, bullet_token_groups)
     if unearned_skill is not None:
         raise RecruiterSummaryError(
