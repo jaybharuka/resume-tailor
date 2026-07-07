@@ -34,7 +34,10 @@ test("full pipeline happy path: upload, run all stages, download PDF", async ({ 
   for (const stageName of STAGE_NAMES) {
     const row = page.getByTestId(`stage-row-${stageName}`);
     await row.getByRole("button", { name: "Run" }).click();
-    await expect(row.getByText("Done")).toBeVisible({ timeout: 120_000 });
+    // Matches the backend's own STAGE_TIMEOUT_SECONDS (app/api/sessions.py) plus
+    // margin for proxy/network overhead - a shorter client-side wait would fail
+    // a stage that's genuinely still working server-side, not actually hung.
+    await expect(row.getByText("Done")).toBeVisible({ timeout: 345_000 });
   }
 
   const downloadLink = page.getByRole("link", { name: /Download resume_pdf/ });

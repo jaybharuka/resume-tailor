@@ -272,6 +272,30 @@ def test_generate_cover_letter_accepts_education_reference_in_prose():
     assert "State University" in document.content
 
 
+def test_generate_cover_letter_accepts_own_project_name_reference_in_prose():
+    """Regression test: naming the candidate's OWN project from their real
+    resume (e.g. "my Inventory Tracker project") is not a claim about the
+    candidate's skills and must not be rejected as an unearned skill -
+    discovered via a real live E2E run where a real LLM referenced the
+    resume's own project name ("Open Source Task Queue") and was incorrectly
+    flagged before this fix."""
+    db = _make_db()
+    resume_doc, job_posting_doc, gap_analysis_doc = base_tailoring_triple()
+    session, tailored_version, job_posting, gap_analysis = _make_session_with_all_prerequisites(
+        db, resume_doc.model_dump(), job_posting_doc.model_dump(), gap_analysis_doc.model_dump(),
+    )
+
+    result_document = CoverLetterDocument(
+        body="Dear Hiring Manager, my Inventory Tracker project demonstrates my backend skills."
+    )
+    orchestrator = FakeOrchestrator(result=OrchestratorResult(output=result_document, provider_used="nvidia", attempts=1))
+    prompt_registry = PromptRegistry(prompts_root="prompts")
+
+    document = generate_cover_letter(db, session, orchestrator, prompt_registry)
+
+    assert "Inventory Tracker" in document.content
+
+
 def test_generate_cover_letter_version_numbering_increments_within_session():
     db = _make_db()
     resume_doc, job_posting_doc, gap_analysis_doc = base_tailoring_triple()
