@@ -213,7 +213,12 @@ def list_documents(session_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=f"session {session_id} not found")
     documents = db.query(GeneratedDocument).filter_by(session_id=session_id).all()
     return [
-        {"document_type": doc.document_type, "storage_path": doc.storage_path, "version_number": doc.version_number}
+        {
+            "document_type": doc.document_type,
+            "storage_path": doc.storage_path,
+            "content": doc.content,
+            "version_number": doc.version_number,
+        }
         for doc in documents
     ]
 
